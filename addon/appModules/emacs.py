@@ -1,16 +1,21 @@
 import appModuleHandler
-from scriptHandler import script
 import ui
-import api
 import os
-import socket
+# ...existing code...
+from textInfos import OffsetsTextInfo
+# ...existing code...
+
+class MinibufferTextInfo(OffsetsTextInfo):
+    # ...
+class EmacsTextInfo(OffsetsTextInfo):
+    # ...
+# ...existing code...import socket
 import struct
 import time
 from NVDAObjects import behaviors
-from NVDAObjects.window import Window
-import textInfos
+from textInfos.offsets import OffsetsTextInfo
 
-_client = None
+_client: socket.socket | None = None
 
 
 def _initClient(retries=20, delay=0.05) -> bool:
@@ -20,7 +25,9 @@ def _initClient(retries=20, delay=0.05) -> bool:
     tones.beep(1500, 50)
     home = os.environ.get("HOME") or os.environ.get("USERPROFILE")
     if not home:
-        raise RuntimeError("Cannot determine home directory – both HOME and USERPROFILE are missing")
+        raise RuntimeError(
+            "Cannot determine home directory – both HOME and USERPROFILE are missing"
+        )
 
     port_path = os.path.join(home, ".emacs.d", ".eval-server-port")
 
@@ -40,29 +47,21 @@ def _initClient(retries=20, delay=0.05) -> bool:
             time.sleep(delay)
             continue
         except Exception as e:
-            print(f"Neočakávaná chyba pri _initClient: {e}")
+            print(f"Unexpected error in _initClient: {e}")
             time.sleep(delay)
 
     _client = None
     return False
 
 
-def _terminateClient():
-    global _client
-    if _client:
-        try:
-            _client.close()
-        except Exception:
-            pass
-        _client = None
-
-
 def _sendAll(data: bytes):
     global _client
+    if _client is None:
+        raise RuntimeError("Client is not initialized. Call _initClient first.")
     try:
         _client.sendall(data)
     except (BrokenPipeError, ConnectionResetError):
-        print("Spojenie zlyhalo pri sendall — pokúšam sa reštartovať spojenie...")
+        print("Connection failed during sendall — attempting to restart connection...")
         if _initClient():
             _client.sendall(data)
         else:
@@ -71,19 +70,21 @@ def _sendAll(data: bytes):
 
 def _recvAll(n: int) -> bytes:
     global _client
+    if _client is None:
+        raise RuntimeError("Client is not initialized. Call _initClient first.")
     data = b""
     while len(data) < n:
         try:
             packet = _client.recv(n - len(data))
             if not packet:
-                raise ConnectionError("Spojenie s Emacs serverom sa prerušilo.")
+                raise ConnectionError("Connection closed by the server")
             data += packet
         except (BrokenPipeError, ConnectionResetError):
-            print("Spojenie zlyhalo pri recv — pokúšam sa reštartovať spojenie...")
+            print("Connection failed during recv — attempting to restart connection...")
             if _initClient():
                 return _recvAll(n)  # Retry from scratch
             else:
-                raise RuntimeError("Nepodarilo sa znovu vytvoriť spojenie pri recv")
+                raise RuntimeError("Failed to re-establish connection during recv")
     return data
 
 
@@ -113,7 +114,7 @@ def _emacsInt(expr: str) -> int:
         return 0
 
 
-class MinibufferTextInfo(textInfos.offsets.OffsetsTextInfo):
+class MinibufferTextInfo(OffsetsTextInfo):
     def _getStoryText(self):
         return _emacsEval("(minibuffer-prompt)") + _emacsEval("(minibuffer-contents)")
 
@@ -131,7 +132,7 @@ class MinibufferTextInfo(textInfos.offsets.OffsetsTextInfo):
         _emacsEval(f"(goto-char {offset + 1})")
 
 
-class EmacsTextInfo(textInfos.offsets.OffsetsTextInfo):
+class EmacsTextInfo(OffsetsTextInfo):
     def _getStoryLength(self):
         return _emacsInt("(- (point-max) (point-min))")
 
@@ -200,27 +201,3 @@ class AppModule(appModuleHandler.AppModule):
     def chooseNVDAObjectOverlayClasses(self, obj, clsList):
         if obj.windowClassName == "Emacs":
             clsList.insert(0, Emacs)
-
-    @script(gesture="kb:nvda+shift+v")
-    def script_pokus(self, gesture):
-        ui.browseableMessage(self.appPath)
-
-    @script(
-        description=_("Announces the window class name of the current focus object"),
-        gesture="kb:NVDA+leftArrow",
-    )
-    def script_announceWindowClassName(self, gesture):
-        focusObj = api.getFocusObject()
-        name = focusObj.name
-        windowClassName = focusObj.windowClassName
-        ui.message(f"class for {name} window: {windowClassName}")
-
-    @script(
-        description=_("Announces the window control ID of the current focus object"),
-        gesture="kb:NVDA+rightArrow",
-    )
-    def script_announceWindowControlID(self, gesture):
-        focusObj = api.getFocusObject()
-        name = focusObj.name
-        windowControlID = focusObj.windowControlID
-        ui.message(f"Control ID for {name} window: {windowControlID}")
