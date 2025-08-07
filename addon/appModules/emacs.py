@@ -108,7 +108,10 @@ def _emacsInt(expr: str) -> int:
 
 class MinibufferTextInfo(OffsetsTextInfo):
     def _getStoryText(self):
-        return _emacsEval("(minibuffer-prompt)") + _emacsEval("(minibuffer-contents)")
+        # Get the prompt and contents as plain text, stripping any text properties
+        prompt = _emacsEval("(substring-no-properties (minibuffer-prompt))")
+        contents = _emacsEval("(substring-no-properties (minibuffer-contents))")
+        return prompt + contents
 
     def _getStoryLength(self):
         return len(self._getStoryText())
