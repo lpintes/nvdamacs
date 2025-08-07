@@ -172,7 +172,7 @@ class EmacsTextInfo(OffsetsTextInfo):
 
 class Emacs(behaviors.EditableTextWithoutAutoSelectDetection):
     def _get_TextInfo(self):
-        # Skontroluj, či sme v minibuffri
+        # Check if we are in the minibuffer
         if _emacsEval("(minibufferp)") == "t":
             return MinibufferTextInfo
         else:
