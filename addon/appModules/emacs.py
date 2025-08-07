@@ -1,19 +1,11 @@
 import appModuleHandler
 import ui
 import os
-# ...existing code...
-from textInfos import OffsetsTextInfo
-# ...existing code...
-
-class MinibufferTextInfo(OffsetsTextInfo):
-    # ...
-class EmacsTextInfo(OffsetsTextInfo):
-    # ...
-# ...existing code...import socket
 import struct
 import time
 from NVDAObjects import behaviors
 from textInfos.offsets import OffsetsTextInfo
+import socket
 
 _client: socket.socket | None = None
 
