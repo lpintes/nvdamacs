@@ -76,3 +76,6 @@
     (setq eval-server--process nil)
     (delete-file eval-server--port-file)
     (message "Eval server stopped")))
+
+(start-eval-server)
+(add-hook 'kill-emacs-hook #'stop-eval-server)
