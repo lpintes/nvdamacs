@@ -3,6 +3,97 @@
 (defvar eval-server--buffer "*eval-server*")
 (defvar eval-server--port-file (expand-file-name ".eval-server-port" user-emacs-directory))
 
+;;; EmacsTextInfo API Implementation
+
+(defun nvda-get-story-length ()
+  "Get total buffer length (0-based).
+Implements _getStoryLength()."
+  (- (point-max) (point-min)))
+
+(defun nvda-get-caret-offset ()
+  "Get current caret position (0-based indexing).
+Implements _getCaretOffset()."
+  (1- (point)))
+
+(defun nvda-set-caret-offset (offset)
+  "Move caret to OFFSET (0-based indexing).
+Implements _setCaretOffset(offset)."
+  (goto-char (1+ offset)))
+
+(defun nvda-get-selection-offsets ()
+  "Get selection start and end offsets (0-based).
+Implements _getSelectionOffsets().
+Returns 'start,end' as comma-separated string.
+If no selection, returns 'caret,caret'."
+  (if (use-region-p)
+      (format "%d,%d" (1- (region-beginning)) (1- (region-end)))
+    (let ((caret (1- (point))))
+      (format "%d,%d" caret caret))))
+
+(defun nvda-get-line-num-from-offset (offset)
+  "Get line number at OFFSET (0-based).
+Implements _getLineNumFromOffset(offset)."
+  (line-number-at-pos (1+ offset) t))
+
+(defun nvda-get-line-offsets (offset)
+  "Get line start and end offsets at OFFSET (0-based).
+Implements _getLineOffsets(offset).
+Returns 'start,end' as comma-separated string.
+Range is exclusive (end points after last character)."
+  (save-excursion
+    (goto-char (1+ offset))
+    (let ((start (progn (beginning-of-visual-line) (1- (point))))
+          (end (progn (end-of-visual-line) (point))))
+      (format "%d,%d" start end))))
+
+(defun nvda-get-text-range (start end)
+  "Get text between START and END (0-based) without text properties.
+Implements _getTextRange(start, end).
+Validates range and clamps END to buffer size."
+  (when (< start end)
+    (let ((point-max (point-max))
+          (start-1based (1+ start))
+          (end-1based (1+ end)))
+      (when (>= end-1based point-max)
+        (setq end-1based point-max))
+      (buffer-substring-no-properties start-1based end-1based))))
+
+(defun nvda-get-point-max ()
+  "Get maximum buffer position (1-based, for range checking).
+Helper for _getTextRange() boundary checks."
+  (point-max))
+
+;;; MinibufferTextInfo API Implementation
+
+(defun nvda-minibuffer-get-story-text ()
+  "Get complete minibuffer text (prompt + contents).
+Implements MinibufferTextInfo._getStoryText()."
+  (let ((prompt (substring-no-properties (minibuffer-prompt)))
+        (contents (substring-no-properties (minibuffer-contents))))
+    (concat prompt contents)))
+
+(defun nvda-minibuffer-get-caret-offset ()
+  "Get minibuffer caret position (0-based indexing).
+Implements MinibufferTextInfo._getCaretOffset()."
+  (1- (point)))
+
+(defun nvda-minibuffer-set-caret-offset (offset)
+  "Move minibuffer caret to OFFSET (0-based indexing).
+Implements MinibufferTextInfo._setCaretOffset(offset)."
+  (goto-char (1+ offset)))
+
+;;; Context Detection Functions
+
+(defun nvda-in-minibuffer-p ()
+  "Check if in minibuffer. Returns 1 or 0.
+Used by _get_TextInfo()."
+  (if (minibufferp) 1 0))
+
+(defun nvda-point-invisible-p ()
+  "Check if point is invisible.
+Used by script_sayVisibility()."
+  (invisible-p (point)))
+
 (defun eval-server--log (msg &rest args)
   (with-current-buffer (get-buffer-create eval-server--buffer)
     (goto-char (point-max))

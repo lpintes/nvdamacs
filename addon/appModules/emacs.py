@@ -115,10 +115,7 @@ def _emacsInt(expr: str) -> int:
 class MinibufferTextInfo(OffsetsTextInfo):
     def _getStoryText(self):
         # Get the prompt and contents as plain text, stripping any text properties
-        prompt = _emacsEval("(substring-no-properties (minibuffer-prompt))")
-        contents = _emacsEval(
-            "(substring-no-properties (minibuffer-contents))")
-        return prompt + contents
+        return _emacsEval("(nvda-minibuffer-get-story-text)")
 
     def _getStoryLength(self):
         return len(self._getStoryText())
@@ -128,59 +125,45 @@ class MinibufferTextInfo(OffsetsTextInfo):
         return text[start:end]
 
     def _getCaretOffset(self):
-        return _emacsInt("(1- (point))")
+        return _emacsInt("(nvda-minibuffer-get-caret-offset)")
 
     def _setCaretOffset(self, offset):
-        _emacsEval(f"(goto-char {offset + 1})")
+        _emacsEval(f"(nvda-minibuffer-set-caret-offset {offset})")
 
 
 class EmacsTextInfo(OffsetsTextInfo):
     def _getStoryLength(self):
-        return _emacsInt("(- (point-max) (point-min))")
+        return _emacsInt("(nvda-get-story-length)")
 
     def _getCaretOffset(self):
-        return _emacsInt("(point)") - 1
+        return _emacsInt("(nvda-get-caret-offset)")
 
     def _setCaretOffset(self, offset):
-        _emacsEval(f"(goto-char {offset + 1})")
+        _emacsEval(f"(nvda-set-caret-offset {offset})")
 
     def _getSelectionOffsets(self):
-        if _emacsEval("(use-region-p)") == "t":
-            start = _emacsInt("(1- (region-beginning))")
-            end = _emacsInt("(1- (region-end))")
-            return (start, end) if start <= end else (end, start)
-        else:
-            caret = self._getCaretOffset()
-            return (caret, caret)
+        result = _emacsEval("(nvda-get-selection-offsets)")
+        start, end = map(int, result.split(','))
+        return (start, end) if start <= end else (end, start)
 
     def _getLineNumFromOffset(self, offset):
-        return _emacsInt(f"(line-number-at-pos {offset + 1} t)")
+        return _emacsInt(f"(nvda-get-line-num-from-offset {offset})")
 
     def _getLineOffsets(self, offset):
-        return [
-            _emacsInt(
-                f"(save-excursion (goto-char {offset + 1}) (beginning-of-visual-line) (1- (point)))"
-            ),
-            _emacsInt(
-                f"(save-excursion (goto-char {offset + 1}) (end-of-visual-line) (point))"
-            ),
-        ]
+        result = _emacsEval(f"(nvda-get-line-offsets {offset})")
+        start, end = map(int, result.split(','))
+        return [start, end]
 
     def _getTextRange(self, start, end):
-        if start >= end:
-            return ""
-        pointMax = _emacsInt("(point-max)")
-        start += 1
-        end += 1
-        if end >= pointMax:
-            end = pointMax
-        return _emacsEval(f"(buffer-substring-no-properties {start} {end})")
+        # nvda-get-text-range handles all validation and clamping
+        result = _emacsEval(f"(nvda-get-text-range {start} {end})")
+        return result if result else ""
 
 
 class Emacs(behaviors.EditableTextWithoutAutoSelectDetection):
     def _get_TextInfo(self):
         # Check if we are in the minibuffer
-        if _emacsEval("(minibufferp)") == "t":
+        if _emacsInt("(nvda-in-minibuffer-p)") == 1:
             return MinibufferTextInfo
         else:
             return EmacsTextInfo
@@ -191,7 +174,7 @@ class Emacs(behaviors.EditableTextWithoutAutoSelectDetection):
         ui.message(f"{ti._startOffset}, {startOffset}, {endOffset}")
 
     def script_sayVisibility(self, gesture):
-        vis = _emacsEval("(invisible-p (point))")
+        vis = _emacsEval("(nvda-point-invisible-p)")
         ui.message(f"{vis}")
 
     __gestures = {
