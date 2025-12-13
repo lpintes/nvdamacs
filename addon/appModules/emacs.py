@@ -1,4 +1,5 @@
 import appModuleHandler
+import api
 import ui
 import os
 import struct
@@ -6,6 +7,7 @@ import time
 from NVDAObjects import behaviors
 from textInfos.offsets import OffsetsTextInfo
 import socket
+import tones
 
 _client: socket.socket | None = None
 
@@ -33,7 +35,7 @@ def _initClient(retries=20, delay=0.05) -> bool:
                 port_str = f.read().strip()
             port = int(port_str)
 
-            _client = socket.create_connection(("127.0.0.1", port), timeout=1)
+            _client = socket.create_connection(("127.0.0.1", port), timeout=10)
             return True
         except (ConnectionRefusedError, FileNotFoundError, ValueError, socket.timeout):
             time.sleep(delay)
@@ -49,7 +51,8 @@ def _initClient(retries=20, delay=0.05) -> bool:
 def _sendAll(data: bytes):
     global _client
     if _client is None:
-        raise RuntimeError("Client is not initialized. Call _initClient first.")
+        raise RuntimeError(
+            "Client is not initialized. Call _initClient first.")
     try:
         _client.sendall(data)
     except (BrokenPipeError, ConnectionResetError):
@@ -57,13 +60,15 @@ def _sendAll(data: bytes):
         if _initClient():
             _client.sendall(data)
         else:
-            raise RuntimeError("Nepodarilo sa znovu vytvoriť spojenie pri sendall")
+            raise RuntimeError(
+                "Failed to re-establish connection during sendall")
 
 
 def _recvAll(n: int) -> bytes:
     global _client
     if _client is None:
-        raise RuntimeError("Client is not initialized. Call _initClient first.")
+        raise RuntimeError(
+            "Client is not initialized. Call _initClient first.")
     data = b""
     while len(data) < n:
         try:
@@ -76,7 +81,8 @@ def _recvAll(n: int) -> bytes:
             if _initClient():
                 return _recvAll(n)  # Retry from scratch
             else:
-                raise RuntimeError("Failed to re-establish connection during recv")
+                raise RuntimeError(
+                    "Failed to re-establish connection during recv")
     return data
 
 
@@ -110,7 +116,8 @@ class MinibufferTextInfo(OffsetsTextInfo):
     def _getStoryText(self):
         # Get the prompt and contents as plain text, stripping any text properties
         prompt = _emacsEval("(substring-no-properties (minibuffer-prompt))")
-        contents = _emacsEval("(substring-no-properties (minibuffer-contents))")
+        contents = _emacsEval(
+            "(substring-no-properties (minibuffer-contents))")
         return prompt + contents
 
     def _getStoryLength(self):
@@ -178,6 +185,20 @@ class Emacs(behaviors.EditableTextWithoutAutoSelectDetection):
         else:
             return EmacsTextInfo
 
+    def script_sayLineOffsets(self, gesture):
+        ti = self.makeTextInfo("caret")
+        startOffset, endOffset = ti._getLineOffsets(ti._startOffset)
+        ui.message(f"{ti._startOffset}, {startOffset}, {endOffset}")
+
+    def script_sayVisibility(self, gesture):
+        vis = _emacsEval("(invisible-p (point))")
+        ui.message(f"{vis}")
+
+    __gestures = {
+        "kb:NVDA+L": "sayLineOffsets",
+        "kb:NVDA+I": "sayVisibility",
+    }
+
 
 class AppModule(appModuleHandler.AppModule):
     def __init__(self, *args, **kwargs):
@@ -189,8 +210,6 @@ class AppModule(appModuleHandler.AppModule):
         global _client
         super().terminate()
         _client = None
-        import tones
-
         tones.beep(500, 50)
 
     def chooseNVDAObjectOverlayClasses(self, obj, clsList):
