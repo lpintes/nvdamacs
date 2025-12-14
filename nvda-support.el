@@ -1,6 +1,7 @@
 (require 'bindat)
 (require 'json)
 (defvar eval-server--process nil)
+(defvar eval-server--client-process nil)
 (defvar eval-server--buffer "*eval-server*")
 (defvar eval-server--port-file (expand-file-name ".eval-server-port" user-emacs-directory))
 
@@ -228,7 +229,12 @@ Used by script_sayVisibility()."
                   :server t
                   :filter 'eval-server--process-filter
                   :sentinel (lambda (proc event)
-                              (eval-server--log "Connection event: %s %s" proc event))
+                              (eval-server--log "Connection event: %s %s" proc event)
+                              (cond
+                               ((string-match "^open" event)
+                                (setq eval-server--client-process proc))
+                               ((string-match "^connection broken\\|^deleted" event)
+                                (setq eval-server--client-process nil))))
                   :plist '(:buffer ""))))
     (setq eval-server--process server)
     (let ((port (process-contact server :service)))
@@ -242,8 +248,30 @@ Used by script_sayVisibility()."
   (when (process-live-p eval-server--process)
     (delete-process eval-server--process)
     (setq eval-server--process nil)
+    (setq eval-server--client-process nil)
     (delete-file eval-server--port-file)
     (message "Eval server stopped")))
 
+;;; Event System - Message Hook
+
+(defun nvda-advice-message (format-string &rest args)
+  "Send message output to NVDA after displaying in Emacs.
+This is an :after advice for the 'message' function."
+  (when (and format-string
+             eval-server--client-process
+             (process-live-p eval-server--client-process))
+    (let ((text (apply #'format format-string args)))
+      (when (and text (not (string-empty-p text)))
+        (nvda-send-event eval-server--client-process "speak" `((text . ,text)))))))
+
+(defun nvda-enable-message-hook ()
+  "Enable sending Emacs messages to NVDA."
+  (advice-add 'message :after #'nvda-advice-message))
+
+(defun nvda-disable-message-hook ()
+  "Disable sending Emacs messages to NVDA."
+  (advice-remove 'message #'nvda-advice-message))
+
 (start-eval-server)
+(nvda-enable-message-hook)
 (add-hook 'kill-emacs-hook #'stop-eval-server)

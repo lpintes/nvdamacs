@@ -120,6 +120,16 @@ class AppModule(appModuleHandler.AppModule):
         super().__init__(*args, **kwargs)
         if not initClient():
             ui.browseableMessage("Eval server is probably not running.")
+        else:
+            # Register event handlers
+            rpcClient.registerEventHandler("speak", self._onSpeakEvent)
+
+    def _onSpeakEvent(self, data):
+        """Handle speak event from Emacs."""
+        import speech
+        text = data.get("text", "")
+        if text:
+            speech.speakMessage(text)
 
     def terminate(self):
         global rpcClient
