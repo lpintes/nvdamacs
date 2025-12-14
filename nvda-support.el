@@ -254,14 +254,21 @@ Used by script_sayVisibility()."
 
 ;;; Event System - Message Hook
 
+(defvar nvda-last-sent-message nil
+  "Last message sent to NVDA to avoid duplicates.")
+
 (defun nvda-advice-message (format-string &rest args)
   "Send message output to NVDA after displaying in Emacs.
-This is an :after advice for the 'message' function."
+This is an :after advice for the 'message' function.
+Filters out duplicate consecutive messages to avoid spam."
   (when (and format-string
              eval-server--client-process
              (process-live-p eval-server--client-process))
     (let ((text (apply #'format format-string args)))
-      (when (and text (not (string-empty-p text)))
+      (when (and text
+                 (not (string-empty-p text))
+                 (not (string= text nvda-last-sent-message)))
+        (setq nvda-last-sent-message text)
         (nvda-send-event eval-server--client-process "speak" `((text . ,text)))))))
 
 (defun nvda-enable-message-hook ()
