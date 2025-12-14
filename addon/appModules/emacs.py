@@ -2,19 +2,18 @@ import appModuleHandler
 import api
 import ui
 import os
-import struct
-import time
 from NVDAObjects import behaviors
 from textInfos.offsets import OffsetsTextInfo
-import socket
 import tones
+from . import rpc
 
-_client: socket.socket | None = None
+rpcClient: rpc.RpcClient | None = None
 
 
-def _initClient(retries=20, delay=0.05) -> bool:
-    global _client
-    import tones
+def initClient(retries=20, delay=0.05) -> bool:
+    """Initialize RPC client connection to Emacs server."""
+    global rpcClient
+    import time
 
     tones.beep(1500, 50)
     home = os.environ.get("HOME") or os.environ.get("USERPROFILE")
@@ -23,99 +22,32 @@ def _initClient(retries=20, delay=0.05) -> bool:
             "Cannot determine home directory – both HOME and USERPROFILE are missing"
         )
 
-    port_path = os.path.join(home, ".emacs.d", ".eval-server-port")
+    portFile = os.path.join(home, ".emacs.d", ".eval-server-port")
 
+    # Retry connection
     for attempt in range(retries):
         try:
-            if not os.path.isfile(port_path):
+            if not os.path.isfile(portFile):
                 time.sleep(delay)
                 continue
 
-            with open(port_path, "r", encoding="utf-8") as f:
-                port_str = f.read().strip()
-            port = int(port_str)
+            rpcClient = rpc.RpcClient(portFile)
+            if rpcClient.connect():
+                return True
 
-            _client = socket.create_connection(("127.0.0.1", port), timeout=10)
-            return True
-        except (ConnectionRefusedError, FileNotFoundError, ValueError, socket.timeout):
             time.sleep(delay)
-            continue
         except Exception as e:
-            print(f"Unexpected error in _initClient: {e}")
+            print(f"Unexpected error in initClient: {e}")
             time.sleep(delay)
 
-    _client = None
+    rpcClient = None
     return False
-
-
-def _sendAll(data: bytes):
-    global _client
-    if _client is None:
-        raise RuntimeError(
-            "Client is not initialized. Call _initClient first.")
-    try:
-        _client.sendall(data)
-    except (BrokenPipeError, ConnectionResetError):
-        print("Connection failed during sendall — attempting to restart connection...")
-        if _initClient():
-            _client.sendall(data)
-        else:
-            raise RuntimeError(
-                "Failed to re-establish connection during sendall")
-
-
-def _recvAll(n: int) -> bytes:
-    global _client
-    if _client is None:
-        raise RuntimeError(
-            "Client is not initialized. Call _initClient first.")
-    data = b""
-    while len(data) < n:
-        try:
-            packet = _client.recv(n - len(data))
-            if not packet:
-                raise ConnectionError("Connection closed by the server")
-            data += packet
-        except (BrokenPipeError, ConnectionResetError):
-            print("Connection failed during recv — attempting to restart connection...")
-            if _initClient():
-                return _recvAll(n)  # Retry from scratch
-            else:
-                raise RuntimeError(
-                    "Failed to re-establish connection during recv")
-    return data
-
-
-def _emacsEval(expr: str) -> str:
-    global _client
-    if _client is None:
-        return ""
-
-    data = expr.encode("utf-8")
-    _sendAll(struct.pack(">I", len(data)) + data)
-
-    raw_len = _recvAll(4)
-    (resp_len,) = struct.unpack(">I", raw_len)
-    resp = _recvAll(resp_len)
-
-    result = resp.decode("utf-8")
-    if result.startswith('"') and result.endswith('"'):
-        result = result[1:-1]
-    return result
-
-
-def _emacsInt(expr: str) -> int:
-    try:
-        res = _emacsEval(expr)
-        return int(res)
-    except ValueError:
-        return 0
 
 
 class MinibufferTextInfo(OffsetsTextInfo):
     def _getStoryText(self):
         # Get the prompt and contents as plain text, stripping any text properties
-        return _emacsEval("(nvda-minibuffer-get-story-text)")
+        return rpcClient.request("minibufferGetStoryText")
 
     def _getStoryLength(self):
         return len(self._getStoryText())
@@ -125,45 +57,45 @@ class MinibufferTextInfo(OffsetsTextInfo):
         return text[start:end]
 
     def _getCaretOffset(self):
-        return _emacsInt("(nvda-minibuffer-get-caret-offset)")
+        return rpcClient.request("minibufferGetCaretOffset")
 
     def _setCaretOffset(self, offset):
-        _emacsEval(f"(nvda-minibuffer-set-caret-offset {offset})")
+        rpcClient.request("minibufferSetCaretOffset", {"offset": offset})
 
 
 class EmacsTextInfo(OffsetsTextInfo):
     def _getStoryLength(self):
-        return _emacsInt("(nvda-get-story-length)")
+        return rpcClient.request("getStoryLength")
 
     def _getCaretOffset(self):
-        return _emacsInt("(nvda-get-caret-offset)")
+        return rpcClient.request("getCaretOffset")
 
     def _setCaretOffset(self, offset):
-        _emacsEval(f"(nvda-set-caret-offset {offset})")
+        rpcClient.request("setCaretOffset", {"offset": offset})
 
     def _getSelectionOffsets(self):
-        result = _emacsEval("(nvda-get-selection-offsets)")
-        start, end = map(int, result.split(','))
+        result = rpcClient.request("getSelectionOffsets")
+        start = result["start"]
+        end = result["end"]
         return (start, end) if start <= end else (end, start)
 
     def _getLineNumFromOffset(self, offset):
-        return _emacsInt(f"(nvda-get-line-num-from-offset {offset})")
+        return rpcClient.request("getLineNumFromOffset", {"offset": offset})
 
     def _getLineOffsets(self, offset):
-        result = _emacsEval(f"(nvda-get-line-offsets {offset})")
-        start, end = map(int, result.split(','))
-        return [start, end]
+        result = rpcClient.request("getLineOffsets", {"offset": offset})
+        return [result["startOffset"], result["endOffset"]]
 
     def _getTextRange(self, start, end):
         # nvda-get-text-range handles all validation and clamping
-        result = _emacsEval(f"(nvda-get-text-range {start} {end})")
+        result = rpcClient.request("getTextRange", {"start": start, "end": end})
         return result if result else ""
 
 
 class Emacs(behaviors.EditableTextWithoutAutoSelectDetection):
     def _get_TextInfo(self):
         # Check if we are in the minibuffer
-        if _emacsInt("(nvda-in-minibuffer-p)") == 1:
+        if rpcClient.request("inMinibufferP") == 1:
             return MinibufferTextInfo
         else:
             return EmacsTextInfo
@@ -174,7 +106,7 @@ class Emacs(behaviors.EditableTextWithoutAutoSelectDetection):
         ui.message(f"{ti._startOffset}, {startOffset}, {endOffset}")
 
     def script_sayVisibility(self, gesture):
-        vis = _emacsEval("(nvda-point-invisible-p)")
+        vis = rpcClient.request("pointInvisibleP")
         ui.message(f"{vis}")
 
     __gestures = {
@@ -186,13 +118,15 @@ class Emacs(behaviors.EditableTextWithoutAutoSelectDetection):
 class AppModule(appModuleHandler.AppModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if not _initClient():
+        if not initClient():
             ui.browseableMessage("Eval server is probably not running.")
 
     def terminate(self):
-        global _client
+        global rpcClient
         super().terminate()
-        _client = None
+        if rpcClient:
+            rpcClient.close()
+        rpcClient = None
         tones.beep(500, 50)
 
     def chooseNVDAObjectOverlayClasses(self, obj, clsList):

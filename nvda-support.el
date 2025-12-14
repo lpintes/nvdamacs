@@ -1,4 +1,5 @@
 (require 'bindat)
+(require 'json)
 (defvar eval-server--process nil)
 (defvar eval-server--buffer "*eval-server*")
 (defvar eval-server--port-file (expand-file-name ".eval-server-port" user-emacs-directory))
@@ -23,12 +24,14 @@ Implements _setCaretOffset(offset)."
 (defun nvda-get-selection-offsets ()
   "Get selection start and end offsets (0-based).
 Implements _getSelectionOffsets().
-Returns 'start,end' as comma-separated string.
-If no selection, returns 'caret,caret'."
+Returns structured object with start and end.
+If no selection, returns caret position for both."
   (if (use-region-p)
-      (format "%d,%d" (1- (region-beginning)) (1- (region-end)))
+      `((start . ,(1- (region-beginning)))
+        (end . ,(1- (region-end))))
     (let ((caret (1- (point))))
-      (format "%d,%d" caret caret))))
+      `((start . ,caret)
+        (end . ,caret)))))
 
 (defun nvda-get-line-num-from-offset (offset)
   "Get line number at OFFSET (0-based).
@@ -38,13 +41,14 @@ Implements _getLineNumFromOffset(offset)."
 (defun nvda-get-line-offsets (offset)
   "Get line start and end offsets at OFFSET (0-based).
 Implements _getLineOffsets(offset).
-Returns 'start,end' as comma-separated string.
+Returns structured object with startOffset and endOffset.
 Range is exclusive (end points after last character)."
   (save-excursion
     (goto-char (1+ offset))
     (let ((start (progn (beginning-of-visual-line) (1- (point))))
           (end (progn (end-of-visual-line) (point))))
-      (format "%d,%d" start end))))
+      `((startOffset . ,start)
+        (endOffset . ,end)))))
 
 (defun nvda-get-text-range (start end)
   "Get text between START and END (0-based) without text properties.
@@ -94,6 +98,80 @@ Used by _get_TextInfo()."
 Used by script_sayVisibility()."
   (invisible-p (point)))
 
+;;; JSON-RPC Infrastructure
+
+(defvar nvda-method-handlers
+  '(("getStoryLength" . nvda-get-story-length)
+    ("getCaretOffset" . nvda-get-caret-offset)
+    ("setCaretOffset" . nvda-set-caret-offset)
+    ("getSelectionOffsets" . nvda-get-selection-offsets)
+    ("getLineNumFromOffset" . nvda-get-line-num-from-offset)
+    ("getLineOffsets" . nvda-get-line-offsets)
+    ("getTextRange" . nvda-get-text-range)
+    ("getPointMax" . nvda-get-point-max)
+    ("minibufferGetStoryText" . nvda-minibuffer-get-story-text)
+    ("minibufferGetCaretOffset" . nvda-minibuffer-get-caret-offset)
+    ("minibufferSetCaretOffset" . nvda-minibuffer-set-caret-offset)
+    ("inMinibufferP" . nvda-in-minibuffer-p)
+    ("pointInvisibleP" . nvda-point-invisible-p))
+  "Mapping of JSON-RPC method names to Emacs functions.")
+
+(defun nvda-send-message (proc message)
+  "Send MESSAGE as JSON to PROC (client process)."
+  (let* ((json-str (json-encode message))
+         (payload (encode-coding-string json-str 'utf-8))
+         (length (bindat-pack '((:len u32)) `((:len . ,(length payload)))))
+         (full-msg (concat length payload)))
+    (process-send-string proc full-msg)))
+
+(defun nvda-send-response (proc id result)
+  "Send success response with ID and RESULT to PROC."
+  (nvda-send-message proc `((type . "response")
+                            (id . ,id)
+                            (result . ,result))))
+
+(defun nvda-send-error (proc id code message &optional data)
+  "Send error response with ID, CODE, MESSAGE, and optional DATA to PROC."
+  (let ((error-obj `((code . ,code)
+                     (message . ,message))))
+    (when data
+      (setq error-obj (append error-obj `((data . ,data)))))
+    (nvda-send-message proc `((type . "response")
+                              (id . ,id)
+                              (error . ,error-obj)))))
+
+(defun nvda-send-event (proc event-name data)
+  "Send EVENT-NAME with DATA to PROC."
+  (nvda-send-message proc `((type . "event")
+                            (event . ,event-name)
+                            (data . ,data))))
+
+(defun nvda-call-handler (handler params)
+  "Call HANDLER with PARAMS extracted appropriately."
+  (cond
+   ;; No params
+   ((null params) (funcall handler))
+   ;; Single param: offset
+   ((alist-get 'offset params) (funcall handler (alist-get 'offset params)))
+   ;; Two params: start, end
+   ((and (alist-get 'start params) (alist-get 'end params))
+    (funcall handler (alist-get 'start params) (alist-get 'end params)))
+   ;; Default: call with no args
+   (t (funcall handler))))
+
+(defun nvda-dispatch-request (proc request)
+  "Dispatch REQUEST to appropriate handler and send response to PROC."
+  (let* ((id (alist-get 'id request))
+         (method (alist-get 'method request))
+         (params (alist-get 'params request))
+         (handler (alist-get method nvda-method-handlers nil nil #'string=)))
+    (if handler
+        (condition-case err
+            (let ((result (nvda-call-handler handler params)))
+              (nvda-send-response proc id result))
+          (error (nvda-send-error proc id -32603 "Internal error" (format "%s" err))))
+      (nvda-send-error proc id -32601 "Method not found" method))))
+
 (defun eval-server--log (msg &rest args)
   (with-current-buffer (get-buffer-create eval-server--buffer)
     (goto-char (point-max))
@@ -103,8 +181,8 @@ Used by script_sayVisibility()."
   (with-temp-file eval-server--port-file
     (insert (number-to-string port))))
 
-(defun eval-server--read-expr (proc)
-  "Read a message from PROC, evaluate it, and send back the result."
+(defun eval-server--read-message (proc)
+  "Read a JSON-RPC message from PROC, dispatch it, and send back the result."
   (let ((len-bytes (process-get proc :pending-bytes)))
     (if (not len-bytes)
         (progn
@@ -114,28 +192,27 @@ Used by script_sayVisibility()."
                    (len (bindat-get-field (bindat-unpack '((:len u32)) buf) :len)))
               (process-put proc :pending-bytes len)
               (process-put proc :buffer (substring buf 4))
-              (eval-server--read-expr proc))))
-      ;; Now read the expression string
+              (eval-server--read-message proc))))
+      ;; Now read the JSON message
       (let* ((buf (process-get proc :buffer)))
         (when (>= (length buf) len-bytes)
-          (let* ((expr-str (decode-coding-string (substring buf 0 len-bytes) 'utf-8))
-                 (rest (substring buf len-bytes))
-                 (result (condition-case err
-                              (let ((val (eval (read expr-str))))
-                                (format "%s" val))
-                            (error (format "Error: %s" err))))
-                 (response (encode-coding-string result 'utf-8))
-                 (resp-len (bindat-pack '((:len u32)) `((:len . ,(length response)))))
-                 (final-msg (concat resp-len response)))
-            (process-send-string proc final-msg)
+          (let* ((json-str (decode-coding-string (substring buf 0 len-bytes) 'utf-8))
+                 (rest (substring buf len-bytes)))
+            (condition-case err
+                (let* ((request (json-read-from-string json-str)))
+                  ;; Dispatch request (this will send the response)
+                  (nvda-dispatch-request proc request))
+              (error
+               ;; Parse error - send error response with id 0
+               (nvda-send-error proc 0 -32700 "Parse error" (format "%s" err))))
             (process-put proc :pending-bytes nil)
             (process-put proc :buffer rest)
-            (eval-server--read-expr proc)))))))
+            (eval-server--read-message proc)))))))
 
 (defun eval-server--process-filter (proc string)
   (let ((buf (or (process-get proc :buffer) "")))
     (process-put proc :buffer (concat buf string))
-    (eval-server--read-expr proc)))
+    (eval-server--read-message proc)))
 
 (defun start-eval-server ()
   "Start the TCP eval server."
