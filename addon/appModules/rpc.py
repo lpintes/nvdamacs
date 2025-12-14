@@ -35,37 +35,45 @@ class RpcWorker(threading.Thread):
 	def connect(self):
 		"""Establish socket connection to Emacs server."""
 		self.socket = socket.create_connection((self.host, self.port), timeout=10)
+		# Remove timeout for recv operations - blocking recv is fine for reader thread
+		self.socket.settimeout(None)
 
 	def run(self):
 		"""Main socket I/O loop - reads messages and routes them."""
-		while self.running:
-			try:
-				# Read 4-byte length prefix
-				rawLen = self._recvExact(4)
-				if not rawLen:
+		try:
+			while self.running:
+				try:
+					# Read 4-byte length prefix
+					rawLen = self._recvExact(4)
+					if not rawLen:
+						print("RpcWorker: Connection closed (no data)")
+						break
+
+					(msgLen,) = struct.unpack(">I", rawLen)
+
+					# Read JSON payload
+					payload = self._recvExact(msgLen)
+					if not payload:
+						print("RpcWorker: Connection closed (incomplete message)")
+						break
+
+					# Parse and route message
+					jsonStr = payload.decode('utf-8')
+					msg = json.loads(jsonStr)
+					self._routeMessage(msg)
+
+				except (ConnectionError, socket.timeout) as e:
+					print(f"RpcWorker connection error: {e}")
 					break
-
-				(msgLen,) = struct.unpack(">I", rawLen)
-
-				# Read JSON payload
-				payload = self._recvExact(msgLen)
-				if not payload:
+				except json.JSONDecodeError as e:
+					print(f"RpcWorker JSON parse error: {e}")
+					continue
+				except Exception as e:
+					print(f"RpcWorker unexpected error: {e}")
 					break
-
-				# Parse and route message
-				jsonStr = payload.decode('utf-8')
-				msg = json.loads(jsonStr)
-				self._routeMessage(msg)
-
-			except (ConnectionError, socket.timeout) as e:
-				print(f"RpcWorker connection error: {e}")
-				break
-			except json.JSONDecodeError as e:
-				print(f"RpcWorker JSON parse error: {e}")
-				continue
-			except Exception as e:
-				print(f"RpcWorker unexpected error: {e}")
-				break
+		finally:
+			self.running = False
+			print("RpcWorker thread exiting")
 
 	def _recvExact(self, n):
 		"""Receive exactly n bytes from socket."""
@@ -173,7 +181,7 @@ class RpcClient:
 
 	def request(self, method, params=None, timeout=2.0):
 		"""Make blocking request and wait for response."""
-		if not self.worker or not self.worker.running:
+		if not self.worker or not self.worker.is_alive():
 			raise RuntimeError("RpcClient not connected")
 
 		requestId = self.worker.getNextId()
