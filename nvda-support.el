@@ -254,6 +254,16 @@ Used by script_sayVisibility()."
 
 ;;; Event System - Message Hook
 
+(defun nvda-speak (format-string &rest args)
+  "Send text to NVDA for speech output.
+Takes FORMAT-STRING and ARGS like 'message'."
+  (when (and format-string
+             eval-server--client-process
+             (process-live-p eval-server--client-process))
+    (let ((text (apply #'format format-string args)))
+      (when (and text (not (string-empty-p text)))
+        (nvda-send-event eval-server--client-process "speak" `((text . ,text)))))))
+
 (defvar nvda-last-sent-message nil
   "Last message sent to NVDA to avoid duplicates.")
 
@@ -261,15 +271,13 @@ Used by script_sayVisibility()."
   "Send message output to NVDA after displaying in Emacs.
 This is an :after advice for the 'message' function.
 Filters out duplicate consecutive messages to avoid spam."
-  (when (and format-string
-             eval-server--client-process
-             (process-live-p eval-server--client-process))
+  (when format-string
     (let ((text (apply #'format format-string args)))
       (when (and text
                  (not (string-empty-p text))
                  (not (string= text nvda-last-sent-message)))
         (setq nvda-last-sent-message text)
-        (nvda-send-event eval-server--client-process "speak" `((text . ,text)))))))
+        (apply #'nvda-speak format-string args)))))
 
 (defun nvda-enable-message-hook ()
   "Enable sending Emacs messages to NVDA."
