@@ -288,5 +288,15 @@ Filters out duplicate consecutive messages to avoid spam."
   (advice-remove 'message #'nvda-advice-message))
 
 (start-eval-server)
-(nvda-enable-message-hook)
+;(nvda-enable-message-hook)
 (add-hook 'kill-emacs-hook #'stop-eval-server)
+
+(defvar nvda--last-echo "")
+
+(defun nvda--post-command ()
+  (let ((echo (current-message)))
+    (when (and echo (not (string= echo nvda--last-echo)))
+      (setq nvda--last-echo echo)
+      (nvda-speak echo))))
+
+(add-hook 'post-command-hook #'nvda--post-command)
