@@ -296,6 +296,7 @@ Filters out duplicate consecutive messages to avoid spam."
 (defun nvda--post-command ()
   (let ((echo (current-message)))
     (when (and echo (not (string= echo nvda--last-echo)))
+      (setq echo (string-replace "%" "%%" echo))
       (setq nvda--last-echo echo)
       (nvda-speak echo))))
 
