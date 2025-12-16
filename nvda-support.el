@@ -52,16 +52,24 @@ Range is exclusive (end points after last character)."
         (endOffset . ,end)))))
 
 (defun nvda-get-text-range (start end)
-  "Get text between START and END (0-based) without text properties.
+  "Get visible text between START and END (0-based) without text properties.
 Implements _getTextRange(start, end).
-Validates range and clamps END to buffer size."
+Validates range, clamps END to buffer size, and filters invisible text."
   (when (< start end)
-    (let ((point-max (point-max))
-          (start-1based (1+ start))
-          (end-1based (1+ end)))
-      (when (>= end-1based point-max)
-        (setq end-1based point-max))
-      (buffer-substring-no-properties start-1based end-1based))))
+    (let ((start-1based (1+ start))
+          (end-1based (1+ end))
+          (result ""))
+      (when (>= end-1based (point-max))
+        (setq end-1based (point-max)))
+      (save-excursion
+        (goto-char start-1based)
+        (while (< (point) end-1based)
+          (let ((next-change (or (next-single-property-change (point) 'invisible nil end-1based)
+                                 end-1based)))
+            (unless (invisible-p (point))
+              (setq result (concat result (buffer-substring-no-properties (point) next-change))))
+            (goto-char next-change))))
+      result)))
 
 (defun nvda-get-point-max ()
   "Get maximum buffer position (1-based, for range checking).
