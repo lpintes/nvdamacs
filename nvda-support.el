@@ -10,7 +10,7 @@
 (defun nvda-get-story-length ()
   "Get total buffer length (0-based).
 Implements _getStoryLength()."
-  (- (point-max) (point-min)))
+  (buffer-size))
 
 (defun nvda-get-caret-offset ()
   "Get current caret position (0-based indexing).
