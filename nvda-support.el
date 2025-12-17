@@ -51,6 +51,36 @@ Range is exclusive (end points after last character)."
       `((startOffset . ,start)
         (endOffset . ,end)))))
 
+(defun nvda-get-character-offsets (offset)
+  "Get character start and end offsets at OFFSET (0-based).
+Implements _getCharacterOffsets(offset).
+Returns structured object with startOffset and endOffset.
+Range is exclusive (end points after the character)."
+  (let ((start offset)
+        (end (min (1+ offset) (buffer-size))))
+    `((startOffset . ,start)
+      (endOffset . ,end))))
+
+(defun nvda-get-word-offsets (offset)
+  "Get word start and end offsets at OFFSET (0-based).
+Implements _getWordOffsets(offset).
+Returns structured object with startOffset and endOffset.
+Range is exclusive (end points after last character).
+If cursor is between words, returns the word to the left."
+  (save-excursion
+    (goto-char (1+ offset))
+    (let ((bounds (bounds-of-thing-at-point 'word)))
+      ;; If no word at point (e.g., on whitespace), try word to the left
+      (unless bounds
+        (backward-word)
+        (setq bounds (bounds-of-thing-at-point 'word)))
+      (if bounds
+          `((startOffset . ,(1- (car bounds)))
+            (endOffset . ,(1- (cdr bounds))))
+        ;; Fallback: treat as single character
+        `((startOffset . ,offset)
+          (endOffset . ,(min (1+ offset) (buffer-size))))))))
+
 (defun nvda-get-text-range (start end)
   "Get visible text between START and END (0-based) without text properties.
 Implements _getTextRange(start, end).
@@ -116,6 +146,8 @@ Used by script_sayVisibility()."
     ("getSelectionOffsets" . nvda-get-selection-offsets)
     ("getLineNumFromOffset" . nvda-get-line-num-from-offset)
     ("getLineOffsets" . nvda-get-line-offsets)
+    ("getCharacterOffsets" . nvda-get-character-offsets)
+    ("getWordOffsets" . nvda-get-word-offsets)
     ("getTextRange" . nvda-get-text-range)
     ("getPointMax" . nvda-get-point-max)
     ("minibufferGetStoryText" . nvda-minibuffer-get-story-text)

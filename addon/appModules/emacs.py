@@ -86,6 +86,14 @@ class EmacsTextInfo(OffsetsTextInfo):
         result = rpcClient.request("getLineOffsets", {"offset": offset})
         return [result["startOffset"], result["endOffset"]]
 
+    def _getCharacterOffsets(self, offset):
+        result = rpcClient.request("getCharacterOffsets", {"offset": offset})
+        return [result["startOffset"], result["endOffset"]]
+
+    def _getWordOffsets(self, offset):
+        result = rpcClient.request("getWordOffsets", {"offset": offset})
+        return [result["startOffset"], result["endOffset"]]
+
     def _getTextRange(self, start, end):
         # nvda-get-text-range handles all validation and clamping
         result = rpcClient.request("getTextRange", {"start": start, "end": end})
