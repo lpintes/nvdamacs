@@ -371,6 +371,34 @@ M-- M-1 M-x nvda-speak-word for negative."
       ;; Speak from start of word to point
       (nvda--speak-text-range start offset)))))
 
+(defun nvda-speak-region ()
+  "Speak the active region.
+If no region is active, display a message."
+  (interactive)
+  (if (use-region-p)
+      (let ((start (1- (region-beginning)))
+            (end (1- (region-end))))
+        (nvda--speak-text-range start end))
+    (message "No active region")))
+
+(defun nvda-speak-window ()
+  "Speak visible text in current window."
+  (interactive)
+  (let ((start (1- (window-start)))
+        (end (1- (window-end nil t))))
+    (nvda--speak-text-range start end)))
+
+(defun nvda-speak-other-window ()
+  "Speak visible text in other window."
+  (interactive)
+  (let ((other-win (next-window)))
+    (if (eq other-win (selected-window))
+        (message "No other window")
+      (with-selected-window other-win
+        (let ((start (1- (window-start)))
+              (end (1- (window-end nil t))))
+          (nvda--speak-text-range start end))))))
+
 (defvar nvda--last-sent-message nil
   "Last message sent to NVDA to avoid duplicates.")
 
@@ -417,6 +445,9 @@ Filters out duplicate consecutive messages to avoid spam."
 (define-key nvda-speak-map (kbd "c") 'nvda-speak-character)
 (define-key nvda-speak-map (kbd "w") 'nvda-speak-word)
 (define-key nvda-speak-map (kbd "l") 'nvda-speak-line)
+(define-key nvda-speak-map (kbd "r") 'nvda-speak-region)
+(define-key nvda-speak-map (kbd "v") 'nvda-speak-window)
+(define-key nvda-speak-map (kbd "o") 'nvda-speak-other-window)
 
 (global-set-key (kbd "M-n") nvda-speak-map)
 
