@@ -312,26 +312,64 @@ Private helper function for speak-character, speak-line, speak-word."
       (when (and text (not (string-empty-p text)))
         (nvda-speak text)))))
 
-(defun nvda-speak-character (offset)
-  "Speak character at OFFSET (0-based)."
-  (let* ((offsets (nvda--get-character-offsets offset))
+(defun nvda-speak-character ()
+  "Speak character at point."
+  (interactive)
+  (let* ((offset (1- (point)))
+         (offsets (nvda--get-character-offsets offset))
          (start (alist-get 'startOffset offsets))
          (end (alist-get 'endOffset offsets)))
     (nvda--speak-text-range start end)))
 
-(defun nvda-speak-line (offset)
-  "Speak line at OFFSET (0-based)."
-  (let* ((offsets (nvda--get-line-offsets offset))
+(defun nvda-speak-line (&optional arg)
+  "Speak line at point.
+If ARG is nil, speak the entire line.
+If ARG is positive, speak from point to end of line.
+If ARG is negative, speak from start of line to point.
+Use prefix argument: M-1 M-x nvda-speak-line for positive,
+M-- M-1 M-x nvda-speak-line for negative."
+  (interactive "P")
+  (when arg
+    (setq arg (prefix-numeric-value arg)))
+  (let* ((offset (1- (point)))
+         (offsets (nvda--get-line-offsets offset))
          (start (alist-get 'startOffset offsets))
          (end (alist-get 'endOffset offsets)))
-    (nvda--speak-text-range start end)))
+    (cond
+     ((null arg)
+      ;; Speak entire line
+      (nvda--speak-text-range start end))
+     ((> arg 0)
+      ;; Speak from point to end of line
+      (nvda--speak-text-range offset end))
+     ((< arg 0)
+      ;; Speak from start of line to point
+      (nvda--speak-text-range start offset)))))
 
-(defun nvda-speak-word (offset)
-  "Speak word at OFFSET (0-based)."
-  (let* ((offsets (nvda--get-word-offsets offset))
+(defun nvda-speak-word (&optional arg)
+  "Speak word at point.
+If ARG is nil, speak the entire word.
+If ARG is positive, speak from point to end of word.
+If ARG is negative, speak from start of word to point.
+Use prefix argument: M-1 M-x nvda-speak-word for positive,
+M-- M-1 M-x nvda-speak-word for negative."
+  (interactive "P")
+  (when arg
+    (setq arg (prefix-numeric-value arg)))
+  (let* ((offset (1- (point)))
+         (offsets (nvda--get-word-offsets offset))
          (start (alist-get 'startOffset offsets))
          (end (alist-get 'endOffset offsets)))
-    (nvda--speak-text-range start end)))
+    (cond
+     ((null arg)
+      ;; Speak entire word
+      (nvda--speak-text-range start end))
+     ((> arg 0)
+      ;; Speak from point to end of word
+      (nvda--speak-text-range offset end))
+     ((< arg 0)
+      ;; Speak from start of word to point
+      (nvda--speak-text-range start offset)))))
 
 (defvar nvda--last-sent-message nil
   "Last message sent to NVDA to avoid duplicates.")
@@ -370,3 +408,16 @@ Filters out duplicate consecutive messages to avoid spam."
       (nvda-speak echo))))
 
 (add-hook 'post-command-hook #'nvda--post-command)
+
+;;; NVDA Speak Keymap
+
+(defvar nvda-speak-map (make-sparse-keymap)
+  "Keymap for NVDA speak commands.")
+
+(define-key nvda-speak-map (kbd "c") 'nvda-speak-character)
+(define-key nvda-speak-map (kbd "w") 'nvda-speak-word)
+(define-key nvda-speak-map (kbd "l") 'nvda-speak-line)
+
+(global-set-key (kbd "M-n") nvda-speak-map)
+
+(provide 'nvda-support)
