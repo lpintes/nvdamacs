@@ -10,7 +10,7 @@ from . import rpc
 rpcClient: rpc.RpcClient | None = None
 
 
-def initClient(retries=20, delay=0.05) -> bool:
+def initClient(retries=100, delay=0.1) -> bool:
     """Initialize RPC client connection to Emacs server."""
     global rpcClient
     import time
