@@ -426,13 +426,33 @@ Filters out duplicate consecutive messages to avoid spam."
 ;(nvda--enable-message-hook)
 (add-hook 'kill-emacs-hook #'stop-eval-server)
 
-(defun nvda--post-command ()
+;;; Command-specific action system
+
+(defvar nvda--on-command-table
+  (make-hash-table :test 'eq)
+  "Hash table mapping commands to functions to execute after them.")
+
+(defmacro nvda-on-command (command &rest body)
+  "Register BODY to be executed after COMMAND."
+  (declare (indent 1))
+  `(puthash ,command
+            (lambda ()
+              ,@body)
+            nvda--on-command-table))
+
+(defun nvda--post-command-dispatch ()
+  "Execute command-specific actions and read messages."
+  ;; First, execute command-specific action if registered
+  (let ((fn (gethash this-command nvda--on-command-table)))
+    (when fn
+      (funcall fn)))
+  ;; Then, read any messages from the echo area
   (let ((echo (current-message)))
     (when echo
       (setq echo (string-replace "%" "%%" echo))
       (nvda-speak echo))))
 
-(add-hook 'post-command-hook #'nvda--post-command)
+(add-hook 'post-command-hook #'nvda--post-command-dispatch)
 
 ;;; NVDA Speak Keymap
 
