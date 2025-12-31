@@ -132,6 +132,7 @@ class AppModule(appModuleHandler.AppModule):
             # Register event handlers
             rpcClient.registerEventHandler("speakMessage", self._onSpeakMessageEvent)
             rpcClient.registerEventHandler("speakTextInfo", self._onSpeakTextInfoEvent)
+            rpcClient.registerEventHandler("speakCharacter", self._onSpeakCharacterEvent)
 
     def _onSpeakMessageEvent(self, data):
         """Handle speakMessage event from Emacs - for notifications."""
@@ -164,6 +165,13 @@ class AppModule(appModuleHandler.AppModule):
                 speech.speakTextInfo(info, unit=unit, reason=controlTypes.OutputReason.CARET)
             except Exception:
                 tones.beep(200, 50)  # Error beep
+
+    def _onSpeakCharacterEvent(self, data):
+        """Handle speakCharacter event from Emacs - for deleted characters."""
+        import speech
+        char = data.get("char", "")
+        if char:
+            speech.speakSpelling(char)
 
     def terminate(self):
         global rpcClient

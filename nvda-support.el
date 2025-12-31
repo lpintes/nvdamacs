@@ -435,13 +435,72 @@ Filters out duplicate consecutive messages to avoid spam."
               ,@body)
             nvda--on-command-table))
 
+;;; Delete command speech support
+
+(defvar nvda--forward-delete-commands
+  '(delete-char delete-forward-char c-electric-delete)
+  "Commands that delete character at point.")
+
+(defvar nvda--backward-delete-commands
+  '(delete-backward-char backward-delete-char
+    backward-delete-char-untabify c-electric-backspace)
+  "Commands that delete character before point.")
+
+(defvar nvda--pending-deleted-char nil
+  "Character captured before deletion, to be spoken after.")
+
+(defun nvda--send-speak-character (char)
+  "Send CHAR to NVDA for proper character speech."
+  (when (and char
+             eval-server--client-process
+             (process-live-p eval-server--client-process))
+    (nvda--send-event eval-server--client-process "speakCharacter"
+                      `((char . ,(char-to-string char))))))
+
+(defvar nvda--pending-delete-type nil
+  "Type of pending delete: 'forward or 'backward.")
+
+(defun nvda--pre-command-capture-delete ()
+  "Capture character that will be deleted by delete commands."
+  (setq nvda--pending-deleted-char nil)
+  (setq nvda--pending-delete-type nil)
+  (cond
+   ;; Forward delete - we'll speak char at point AFTER deletion
+   ((memq this-command nvda--forward-delete-commands)
+    (unless (eobp)
+      (setq nvda--pending-delete-type 'forward)))
+   ;; Backward delete - capture char before point to speak after
+   ((memq this-command nvda--backward-delete-commands)
+    (unless (bobp)
+      (setq nvda--pending-deleted-char (char-before))
+      (setq nvda--pending-delete-type 'backward)))))
+
+(defun nvda--post-command-speak-deleted ()
+  "Speak appropriate character after deletion."
+  (when nvda--pending-delete-type
+    (cond
+     ;; Forward delete - speak char now at point (what remains)
+     ((eq nvda--pending-delete-type 'forward)
+      (unless (eobp)
+        (nvda--send-speak-character (char-after))))
+     ;; Backward delete - speak the captured deleted char
+     ((eq nvda--pending-delete-type 'backward)
+      (when nvda--pending-deleted-char
+        (nvda--send-speak-character nvda--pending-deleted-char))))
+    (setq nvda--pending-deleted-char nil)
+    (setq nvda--pending-delete-type nil)))
+
+(add-hook 'pre-command-hook #'nvda--pre-command-capture-delete)
+
 (defun nvda--post-command-dispatch ()
   "Execute command-specific actions and read messages."
-  ;; First, execute command-specific action if registered
+  ;; First, speak any deleted character
+  (nvda--post-command-speak-deleted)
+  ;; Then, execute command-specific action if registered
   (let ((fn (gethash this-command nvda--on-command-table)))
     (when fn
       (funcall fn)))
-  ;; Then, read any messages from the echo area
+  ;; Finally, read any messages from the echo area
   (let ((echo (current-message)))
     (when echo
       (setq echo (string-replace "%" "%%" echo))
