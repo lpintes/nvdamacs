@@ -292,84 +292,79 @@ Used by script_sayVisibility()."
     (delete-file eval-server--port-file)
     (message "Eval server stopped")))
 
-;;; Event System - Message Hook
+;;; Event System
 
 (defun nvda-speak (format-string &rest args)
-  "Send text to NVDA for speech output.
+  "Send message to NVDA for speech output (notifications, echo area).
 Takes FORMAT-STRING and ARGS like 'message'."
   (when (and format-string
              eval-server--client-process
              (process-live-p eval-server--client-process))
     (let ((text (apply #'format format-string args)))
       (when (and text (not (string-empty-p text)))
-        (nvda--send-event eval-server--client-process "speak" `((text . ,text)))))))
+        (nvda--send-event eval-server--client-process "speakMessage" `((text . ,text)))))))
+
+(defun nvda--speak-text-info (unit)
+  "Tell NVDA to speak text at caret with UNIT expansion.
+UNIT is one of: character, word, line, paragraph."
+  (when (and eval-server--client-process
+             (process-live-p eval-server--client-process))
+    (nvda--send-event eval-server--client-process "speakTextInfo" `((unit . ,unit)))))
+
+(defun nvda-speak-character ()
+  "Speak character at point."
+  (interactive)
+  (nvda--speak-text-info "character"))
 
 (defun nvda--speak-text-range (start end)
   "Speak text between START and END offsets (0-based).
-Private helper function for speak-character, speak-line, speak-word."
+Uses speakMessage - for partial text ranges (e.g., from cursor to end of line)."
   (when (< start end)
     (let ((text (nvda--get-text-range start end)))
       (when (and text (not (string-empty-p text)))
         (nvda-speak text)))))
 
-(defun nvda-speak-character ()
-  "Speak character at point."
-  (interactive)
-  (let* ((offset (1- (point)))
-         (offsets (nvda--get-character-offsets offset))
-         (start (alist-get 'startOffset offsets))
-         (end (alist-get 'endOffset offsets)))
-    (nvda--speak-text-range start end)))
-
 (defun nvda-speak-line (&optional arg)
   "Speak line at point.
-If ARG is nil, speak the entire line.
+If ARG is nil, speak the entire line using speakTextInfo.
 If ARG is positive, speak from point to end of line.
-If ARG is negative, speak from start of line to point.
-Use prefix argument: M-1 M-x nvda-speak-line for positive,
-M-- M-1 M-x nvda-speak-line for negative."
+If ARG is negative, speak from start of line to point."
   (interactive "P")
-  (when arg
-    (setq arg (prefix-numeric-value arg)))
-  (let* ((offset (1- (point)))
-         (offsets (nvda--get-line-offsets offset))
-         (start (alist-get 'startOffset offsets))
-         (end (alist-get 'endOffset offsets)))
-    (cond
-     ((null arg)
-      ;; Speak entire line
-      (nvda--speak-text-range start end))
-     ((> arg 0)
-      ;; Speak from point to end of line
-      (nvda--speak-text-range offset end))
-     ((< arg 0)
-      ;; Speak from start of line to point
-      (nvda--speak-text-range start offset)))))
+  (if (null arg)
+      ;; Speak entire line - use speakTextInfo for proper whitespace handling
+      (nvda--speak-text-info "line")
+    ;; Partial line - use text range
+    (setq arg (prefix-numeric-value arg))
+    (let* ((offset (1- (point)))
+           (offsets (nvda--get-line-offsets offset))
+           (start (alist-get 'startOffset offsets))
+           (end (alist-get 'endOffset offsets)))
+      (cond
+       ((> arg 0)
+        (nvda--speak-text-range offset end))
+       ((< arg 0)
+        (nvda--speak-text-range start offset))))))
 
 (defun nvda-speak-word (&optional arg)
   "Speak word at point.
-If ARG is nil, speak the entire word.
+If ARG is nil, speak the entire word using speakTextInfo.
 If ARG is positive, speak from point to end of word.
-If ARG is negative, speak from start of word to point.
-Use prefix argument: M-1 M-x nvda-speak-word for positive,
-M-- M-1 M-x nvda-speak-word for negative."
+If ARG is negative, speak from start of word to point."
   (interactive "P")
-  (when arg
-    (setq arg (prefix-numeric-value arg)))
-  (let* ((offset (1- (point)))
-         (offsets (nvda--get-word-offsets offset))
-         (start (alist-get 'startOffset offsets))
-         (end (alist-get 'endOffset offsets)))
-    (cond
-     ((null arg)
-      ;; Speak entire word
-      (nvda--speak-text-range start end))
-     ((> arg 0)
-      ;; Speak from point to end of word
-      (nvda--speak-text-range offset end))
-     ((< arg 0)
-      ;; Speak from start of word to point
-      (nvda--speak-text-range start offset)))))
+  (if (null arg)
+      ;; Speak entire word - use speakTextInfo for proper whitespace handling
+      (nvda--speak-text-info "word")
+    ;; Partial word - use text range
+    (setq arg (prefix-numeric-value arg))
+    (let* ((offset (1- (point)))
+           (offsets (nvda--get-word-offsets offset))
+           (start (alist-get 'startOffset offsets))
+           (end (alist-get 'endOffset offsets)))
+      (cond
+       ((> arg 0)
+        (nvda--speak-text-range offset end))
+       ((< arg 0)
+        (nvda--speak-text-range start offset))))))
 
 (defun nvda-speak-region ()
   "Speak the active region.
@@ -453,6 +448,61 @@ Filters out duplicate consecutive messages to avoid spam."
       (nvda-speak echo))))
 
 (add-hook 'post-command-hook #'nvda--post-command-dispatch)
+
+;;; Navigation command speech bindings
+
+;; Characters
+(nvda-on-command 'forward-char
+  (nvda-speak-character))
+
+(nvda-on-command 'backward-char
+  (nvda-speak-character))
+
+(nvda-on-command 'right-char
+  (nvda-speak-character))
+
+(nvda-on-command 'left-char
+  (nvda-speak-character))
+
+;; Words
+(nvda-on-command 'forward-word
+  (nvda-speak-word))
+
+(nvda-on-command 'backward-word
+  (nvda-speak-word))
+
+(nvda-on-command 'left-word
+  (nvda-speak-word))
+
+(nvda-on-command 'right-word
+  (nvda-speak-word))
+
+;; Lines
+(nvda-on-command 'next-line
+  (nvda-speak-line))
+
+(nvda-on-command 'previous-line
+  (nvda-speak-line))
+
+;; Beginning/end of line - speak character at point
+(nvda-on-command 'move-beginning-of-line
+  (nvda-speak-character))
+
+(nvda-on-command 'move-end-of-line
+  (nvda-speak-character))
+
+(nvda-on-command 'beginning-of-visual-line
+  (nvda-speak-character))
+
+(nvda-on-command 'end-of-visual-line
+  (nvda-speak-character))
+
+;; Dired - speak from cursor to end of line
+(nvda-on-command 'dired-next-line
+  (nvda-speak-line 1))
+
+(nvda-on-command 'dired-previous-line
+  (nvda-speak-line 1))
 
 ;;; NVDA Speak Keymap
 

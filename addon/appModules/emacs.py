@@ -2,7 +2,7 @@ import appModuleHandler
 import api
 import ui
 import os
-from NVDAObjects import behaviors
+from NVDAObjects import NVDAObject
 from textInfos.offsets import OffsetsTextInfo
 import tones
 from . import rpc
@@ -100,7 +100,7 @@ class EmacsTextInfo(OffsetsTextInfo):
         return result if result else ""
 
 
-class Emacs(behaviors.EditableTextWithoutAutoSelectDetection):
+class Emacs(NVDAObject):
     def _get_TextInfo(self):
         # Check if we are in the minibuffer
         if rpcClient.request("inMinibufferP") == 1:
@@ -130,14 +130,40 @@ class AppModule(appModuleHandler.AppModule):
             ui.browseableMessage("Eval server is probably not running.")
         else:
             # Register event handlers
-            rpcClient.registerEventHandler("speak", self._onSpeakEvent)
+            rpcClient.registerEventHandler("speakMessage", self._onSpeakMessageEvent)
+            rpcClient.registerEventHandler("speakTextInfo", self._onSpeakTextInfoEvent)
 
-    def _onSpeakEvent(self, data):
-        """Handle speak event from Emacs."""
+    def _onSpeakMessageEvent(self, data):
+        """Handle speakMessage event from Emacs - for notifications."""
         import speech
         text = data.get("text", "")
         if text:
             speech.speakMessage(text)
+
+    def _onSpeakTextInfoEvent(self, data):
+        """Handle speakTextInfo event from Emacs - for text content."""
+        import speech
+        import textInfos
+        import controlTypes
+
+        unit_name = data.get("unit", "character")
+        unit_map = {
+            "character": textInfos.UNIT_CHARACTER,
+            "word": textInfos.UNIT_WORD,
+            "line": textInfos.UNIT_LINE,
+            "paragraph": textInfos.UNIT_PARAGRAPH,
+        }
+        unit = unit_map.get(unit_name, textInfos.UNIT_CHARACTER)
+
+        # Get the focused Emacs object and create TextInfo
+        focus = api.getFocusObject()
+        if focus and hasattr(focus, "makeTextInfo"):
+            try:
+                info = focus.makeTextInfo(textInfos.POSITION_CARET)
+                info.expand(unit)
+                speech.speakTextInfo(info, unit=unit, reason=controlTypes.OutputReason.CARET)
+            except Exception:
+                tones.beep(200, 50)  # Error beep
 
     def terminate(self):
         global rpcClient
@@ -149,4 +175,20 @@ class AppModule(appModuleHandler.AppModule):
 
     def chooseNVDAObjectOverlayClasses(self, obj, clsList):
         if obj.windowClassName == "Emacs":
+            # Remove NVDA's automatic EditableText classes - we handle speech ourselves
+            from NVDAObjects.window import DisplayModelEditableText
+            from NVDAObjects import behaviors
+            import editableText
+            unwanted = (
+                DisplayModelEditableText,
+                behaviors.EditableTextWithoutAutoSelectDetection,
+                behaviors.EditableTextWithAutoSelectDetection,
+                behaviors.EditableText,
+                behaviors.EditableTextBase,
+                editableText.EditableTextWithoutAutoSelectDetection,
+                editableText.EditableText,
+            )
+            for cls in unwanted:
+                if cls in clsList:
+                    clsList.remove(cls)
             clsList.insert(0, Emacs)
