@@ -1,9 +1,9 @@
 (require 'bindat)
 (require 'json)
-(defvar eval-server--process nil)
-(defvar eval-server--client-process nil)
-(defvar eval-server--buffer "*eval-server*")
-(defvar eval-server--port-file (expand-file-name ".eval-server-port" user-emacs-directory))
+(defvar nvda--server-process nil)
+(defvar nvda--client-process nil)
+(defvar nvda--server-buffer "*nvda-server*")
+(defvar nvda--server-port-file (expand-file-name ".nvda-server-port" user-emacs-directory))
 
 ;;; EmacsTextInfo API Implementation
 
@@ -224,16 +224,16 @@ Used by script_sayVisibility()."
           (error (nvda--send-error proc id -32603 "Internal error" (format "%s" err))))
       (nvda--send-error proc id -32601 "Method not found" method))))
 
-(defun eval-server--log (msg &rest args)
-  (with-current-buffer (get-buffer-create eval-server--buffer)
+(defun nvda--server-log (msg &rest args)
+  (with-current-buffer (get-buffer-create nvda--server-buffer)
     (goto-char (point-max))
     (insert (apply #'format (concat msg "\n") args))))
 
-(defun eval-server--write-port (port)
-  (with-temp-file eval-server--port-file
+(defun nvda--server-write-port (port)
+  (with-temp-file nvda--server-port-file
     (insert (number-to-string port))))
 
-(defun eval-server--read-message (proc)
+(defun nvda--server-read-message (proc)
   "Read a JSON-RPC message from PROC, dispatch it, and send back the result."
   (let ((len-bytes (process-get proc :pending-bytes)))
     (if (not len-bytes)
@@ -244,7 +244,7 @@ Used by script_sayVisibility()."
                    (len (bindat-get-field (bindat-unpack '((:len u32)) buf) :len)))
               (process-put proc :pending-bytes len)
               (process-put proc :buffer (substring buf 4))
-              (eval-server--read-message proc))))
+              (nvda--server-read-message proc))))
       ;; Now read the JSON message
       (let* ((buf (process-get proc :buffer)))
         (when (>= (length buf) len-bytes)
@@ -259,49 +259,49 @@ Used by script_sayVisibility()."
                (nvda--send-error proc 0 -32700 "Parse error" (format "%s" err))))
             (process-put proc :pending-bytes nil)
             (process-put proc :buffer rest)
-            (eval-server--read-message proc)))))))
+            (nvda--server-read-message proc)))))))
 
-(defun eval-server--process-filter (proc string)
+(defun nvda--server-process-filter (proc string)
   (let ((buf (or (process-get proc :buffer) "")))
     (process-put proc :buffer (concat buf string))
-    (eval-server--read-message proc)))
+    (nvda--server-read-message proc)))
 
-(defun start-eval-server ()
-  "Start the TCP eval server."
+(defun nvda--start-server ()
+  "Start the NVDA TCP server."
   (interactive)
-  (when (process-live-p eval-server--process)
+  (when (process-live-p nvda--server-process)
     (user-error "Server is already running"))
 
   (let* ((server (make-network-process
-                  :name "eval-server"
-                  :buffer eval-server--buffer
+                  :name "nvda-server"
+                  :buffer nvda--server-buffer
                   :family 'ipv4
                   :service 0 ;; use random port
                   :server t
-                  :filter 'eval-server--process-filter
+                  :filter 'nvda--server-process-filter
                   :sentinel (lambda (proc event)
-                              (eval-server--log "Connection event: %s %s" proc event)
+                              (nvda--server-log "Connection event: %s %s" proc event)
                               (cond
                                ((string-match "^open" event)
-                                (setq eval-server--client-process proc))
+                                (setq nvda--client-process proc))
                                ((string-match "^connection broken\\|^deleted" event)
-                                (setq eval-server--client-process nil))))
+                                (setq nvda--client-process nil))))
                   :plist '(:buffer ""))))
-    (setq eval-server--process server)
+    (setq nvda--server-process server)
     (let ((port (process-contact server :service)))
-      (eval-server--log "Server started on port %d" port)
-      (eval-server--write-port port)
-      (message "Eval server started on port %d" port))))
+      (nvda--server-log "Server started on port %d" port)
+      (nvda--server-write-port port)
+      (message "NVDA server started on port %d" port))))
 
-(defun stop-eval-server ()
-  "Stop the TCP eval server."
+(defun nvda--stop-server ()
+  "Stop the NVDA TCP server."
   (interactive)
-  (when (process-live-p eval-server--process)
-    (delete-process eval-server--process)
-    (setq eval-server--process nil)
-    (setq eval-server--client-process nil)
-    (delete-file eval-server--port-file)
-    (message "Eval server stopped")))
+  (when (process-live-p nvda--server-process)
+    (delete-process nvda--server-process)
+    (setq nvda--server-process nil)
+    (setq nvda--client-process nil)
+    (delete-file nvda--server-port-file)
+    (message "NVDA server stopped")))
 
 ;;; Event System
 
@@ -309,18 +309,18 @@ Used by script_sayVisibility()."
   "Send message to NVDA for speech output (notifications, echo area).
 Takes FORMAT-STRING and ARGS like 'message'."
   (when (and format-string
-             eval-server--client-process
-             (process-live-p eval-server--client-process))
+             nvda--client-process
+             (process-live-p nvda--client-process))
     (let ((text (apply #'format format-string args)))
       (when (and text (not (string-empty-p text)))
-        (nvda--send-event eval-server--client-process "speakMessage" `((text . ,text)))))))
+        (nvda--send-event nvda--client-process "speakMessage" `((text . ,text)))))))
 
 (defun nvda--speak-text-info (unit)
   "Tell NVDA to speak text at caret with UNIT expansion.
 UNIT is one of: character, word, line, paragraph."
-  (when (and eval-server--client-process
-             (process-live-p eval-server--client-process))
-    (nvda--send-event eval-server--client-process "speakTextInfo" `((unit . ,unit)))))
+  (when (and nvda--client-process
+             (process-live-p nvda--client-process))
+    (nvda--send-event nvda--client-process "speakTextInfo" `((unit . ,unit)))))
 
 (defun nvda-speak-character ()
   "Speak character at point."
@@ -428,9 +428,9 @@ Filters out duplicate consecutive messages to avoid spam."
   "Disable sending Emacs messages to NVDA."
   (advice-remove 'message #'nvda--advice-message))
 
-(start-eval-server)
+(nvda--start-server)
 (nvda--enable-message-hook)
-(add-hook 'kill-emacs-hook #'stop-eval-server)
+(add-hook 'kill-emacs-hook #'nvda--stop-server)
 
 ;;; Command-specific action system
 
@@ -463,9 +463,9 @@ Filters out duplicate consecutive messages to avoid spam."
 (defun nvda--send-speak-character (char)
   "Send CHAR to NVDA for proper character speech."
   (when (and char
-             eval-server--client-process
-             (process-live-p eval-server--client-process))
-    (nvda--send-event eval-server--client-process "speakCharacter"
+             nvda--client-process
+             (process-live-p nvda--client-process))
+    (nvda--send-event nvda--client-process "speakCharacter"
                       `((char . ,(char-to-string char))))))
 
 (defvar nvda--pending-delete-type nil

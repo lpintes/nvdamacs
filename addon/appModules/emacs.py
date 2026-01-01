@@ -22,7 +22,7 @@ def initClient(retries=100, delay=0.1) -> bool:
             "Cannot determine home directory – both HOME and USERPROFILE are missing"
         )
 
-    portFile = os.path.join(home, ".emacs.d", ".eval-server-port")
+    portFile = os.path.join(home, ".emacs.d", ".nvda-server-port")
 
     # Retry connection
     for attempt in range(retries):
@@ -127,7 +127,7 @@ class AppModule(appModuleHandler.AppModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not initClient():
-            ui.browseableMessage("Eval server is probably not running.")
+            ui.browseableMessage("NVDA server is probably not running.")
         else:
             # Register event handlers
             rpcClient.registerEventHandler("speakMessage", self._onSpeakMessageEvent)

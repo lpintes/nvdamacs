@@ -1,4 +1,4 @@
-"""JSON-RPC client for communication with Emacs eval server."""
+"""JSON-RPC client for communication with Emacs server."""
 
 import json
 import socket
