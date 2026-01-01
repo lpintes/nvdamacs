@@ -137,6 +137,17 @@ Used by _get_TextInfo()."
 Used by script_sayVisibility()."
   (invisible-p (point)))
 
+;;; Minibuffer Support
+
+(defun nvda--announce-minibuffer ()
+  "Announce minibuffer prompt and content when entering."
+  (let ((text (nvda--minibuffer-get-story-text)))
+    (when (and text (not (string-empty-p text)))
+      (setq text (string-replace "%" "%%" text))
+      (nvda-speak text))))
+
+(add-hook 'minibuffer-setup-hook #'nvda--announce-minibuffer)
+
 ;;; JSON-RPC Infrastructure
 
 (defvar nvda--method-handlers
