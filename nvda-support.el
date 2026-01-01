@@ -418,7 +418,7 @@ Filters out duplicate consecutive messages to avoid spam."
   (advice-remove 'message #'nvda--advice-message))
 
 (start-eval-server)
-;(nvda--enable-message-hook)
+(nvda--enable-message-hook)
 (add-hook 'kill-emacs-hook #'stop-eval-server)
 
 ;;; Command-specific action system
@@ -501,9 +501,12 @@ Filters out duplicate consecutive messages to avoid spam."
     (when fn
       (funcall fn)))
   ;; Finally, read any messages from the echo area
+  ;; Skip if this message was already spoken by message advice
   (let ((echo (current-message)))
-    (when echo
+    (when (and echo
+               (not (string= echo nvda--last-sent-message)))
       (setq echo (string-replace "%" "%%" echo))
+      (setq nvda--last-sent-message echo)
       (nvda-speak echo))))
 
 (add-hook 'post-command-hook #'nvda--post-command-dispatch)
