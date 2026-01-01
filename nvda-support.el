@@ -556,6 +556,13 @@ Filters out duplicate consecutive messages to avoid spam."
 (nvda-on-command 'end-of-visual-line
   (nvda-speak-character))
 
+;; Paragraphs
+(nvda-on-command 'forward-paragraph
+  (nvda-speak-line))
+
+(nvda-on-command 'backward-paragraph
+  (nvda-speak-line))
+
 ;; Dired - speak from cursor to end of line
 (nvda-on-command 'dired-next-line
   (nvda-speak-line 1))
