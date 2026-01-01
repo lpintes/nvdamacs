@@ -471,10 +471,12 @@ Filters out duplicate consecutive messages to avoid spam."
 (defvar nvda--pending-delete-type nil
   "Type of pending delete: 'forward or 'backward.")
 
-(defun nvda--pre-command-capture-delete ()
-  "Capture character that will be deleted by delete commands."
+(defun nvda--pre-command-hook ()
+  "Pre-command hook: capture delete chars and reset message filter."
   (setq nvda--pending-deleted-char nil)
   (setq nvda--pending-delete-type nil)
+  ;; Reset message filter so duplicate messages across commands are spoken
+  (setq nvda--last-sent-message nil)
   (cond
    ;; Forward delete - we'll speak char at point AFTER deletion
    ((memq this-command nvda--forward-delete-commands)
@@ -501,7 +503,7 @@ Filters out duplicate consecutive messages to avoid spam."
     (setq nvda--pending-deleted-char nil)
     (setq nvda--pending-delete-type nil)))
 
-(add-hook 'pre-command-hook #'nvda--pre-command-capture-delete)
+(add-hook 'pre-command-hook #'nvda--pre-command-hook)
 
 (defun nvda--post-command-dispatch ()
   "Execute command-specific actions and read messages."
