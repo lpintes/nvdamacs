@@ -333,7 +333,7 @@ Uses speakMessage - for partial text ranges (e.g., from cursor to end of line)."
   (when (< start end)
     (let ((text (nvda--get-text-range start end)))
       (when (and text (not (string-empty-p text)))
-        (nvda-speak text)))))
+        (nvda-speak "%s" text)))))
 
 (defun nvda-speak-line (&optional arg)
   "Speak line at point.
@@ -408,6 +408,9 @@ If no region is active, display a message."
 (defvar nvda--last-sent-message ""
   "Last message sent to NVDA to avoid duplicates.")
 
+(defvar nvda--last-spoken-message ""
+  "Last echo area message spoken by NVDA for repeat command.")
+
 (defun nvda--advice-message (format-string &rest args)
   "Send message output to NVDA after displaying in Emacs.
 This is an :after advice for the 'message' function.
@@ -418,6 +421,7 @@ Filters out duplicate consecutive messages to avoid spam."
                  (not (string-empty-p text))
                  (not (string= text nvda--last-sent-message)))
         (setq nvda--last-sent-message text)
+        (setq nvda--last-spoken-message text)
         (apply #'nvda-speak format-string args)))))
 
 (defun nvda--enable-message-hook ()
@@ -518,9 +522,9 @@ Filters out duplicate consecutive messages to avoid spam."
   (let ((echo (current-message)))
     (when (and echo
                (not (string= echo nvda--last-sent-message)))
-      (setq echo (string-replace "%" "%%" echo))
       (setq nvda--last-sent-message echo)
-      (nvda-speak echo))))
+      (setq nvda--last-spoken-message echo)
+      (nvda-speak "%s" echo))))
 
 (add-hook 'post-command-hook #'nvda--post-command-dispatch)
 
@@ -593,17 +597,86 @@ Filters out duplicate consecutive messages to avoid spam."
 (nvda-on-command 'dired-previous-line
   (nvda-speak-line 1))
 
+;;; Additional reading commands
+
+(defun nvda-speak-buffer ()
+  "Speak entire buffer from beginning to end."
+  (interactive)
+  (let ((start 0)
+        (end (1- (point-max))))
+    (nvda--speak-text-range start end)))
+
+(defun nvda-speak-rest-of-buffer ()
+  "Speak from current position to end of buffer."
+  (interactive)
+  (let ((start (1- (point)))
+        (end (1- (point-max))))
+    (nvda--speak-text-range start end)))
+
+(defun nvda--get-page-offsets (offset)
+  "Get page start and end offsets at OFFSET (0-based)."
+  (save-excursion
+    (goto-char (1+ offset))
+    (let ((start (progn (backward-page) (point)))
+          (end (progn (forward-page) (point))))
+      `((startOffset . ,(1- start))
+        (endOffset . ,(1- end))))))
+
+(defun nvda-speak-page ()
+  "Speak current page (delimited by form-feed characters)."
+  (interactive)
+  (let* ((offset (1- (point)))
+         (offsets (nvda--get-page-offsets offset))
+         (start (alist-get 'startOffset offsets))
+         (end (alist-get 'endOffset offsets)))
+    (nvda--speak-text-range start end)))
+
+(defun nvda-speak-sexp ()
+  "Speak s-expression at point."
+  (interactive)
+  (condition-case err
+      (let* ((bounds (bounds-of-thing-at-point 'sexp))
+             (start (1- (car bounds)))
+             (end (1- (cdr bounds))))
+        (nvda--speak-text-range start end))
+    (error (nvda-speak "No s-expression at point"))))
+
+(defun nvda-repeat-last-message ()
+  "Repeat the last echo area message spoken by NVDA."
+  (interactive)
+  (if (and nvda--last-spoken-message
+           (not (string-empty-p nvda--last-spoken-message)))
+      (nvda-speak "%s" nvda--last-spoken-message)
+    (message "No message to repeat")))
+
+(defun nvda-speak-rectangle ()
+  "Speak rectangular region."
+  (interactive)
+  (if (and (use-region-p) rectangle-mark-mode)
+      (let ((lines (extract-rectangle (region-beginning) (region-end))))
+        (nvda-speak "%s" (mapconcat #'identity lines "\n")))
+    (message "No rectangular region active")))
+
 ;;; NVDA Speak Keymap
 
 (defvar nvda-speak-map (make-sparse-keymap)
   "Keymap for NVDA speak commands.")
 
+;; Basic reading commands (existing)
 (define-key nvda-speak-map (kbd "c") 'nvda-speak-character)
 (define-key nvda-speak-map (kbd "w") 'nvda-speak-word)
 (define-key nvda-speak-map (kbd "l") 'nvda-speak-line)
 (define-key nvda-speak-map (kbd "r") 'nvda-speak-region)
 (define-key nvda-speak-map (kbd "v") 'nvda-speak-window)
 (define-key nvda-speak-map (kbd "o") 'nvda-speak-other-window)
+
+;; Additional reading commands (new)
+(define-key nvda-speak-map (kbd "b") 'nvda-speak-buffer)
+(define-key nvda-speak-map (kbd "B") 'nvda-speak-rest-of-buffer)
+(define-key nvda-speak-map (kbd "[") 'nvda-speak-page)
+(define-key nvda-speak-map (kbd "e") 'nvda-speak-sexp)
+(define-key nvda-speak-map (kbd "m") 'nvda-repeat-last-message)
+(define-key nvda-speak-map (kbd "R") 'nvda-speak-rectangle)
 
 (global-set-key (kbd "M-n") nvda-speak-map)
 
