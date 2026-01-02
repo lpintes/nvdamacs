@@ -405,7 +405,7 @@ If no region is active, display a message."
               (end (1- (window-end nil t))))
           (nvda--speak-text-range start end))))))
 
-(defvar nvda--last-sent-message nil
+(defvar nvda--last-sent-message ""
   "Last message sent to NVDA to avoid duplicates.")
 
 (defun nvda--advice-message (format-string &rest args)
@@ -476,7 +476,7 @@ Filters out duplicate consecutive messages to avoid spam."
   (setq nvda--pending-deleted-char nil)
   (setq nvda--pending-delete-type nil)
   ;; Reset message filter so duplicate messages across commands are spoken
-  (setq nvda--last-sent-message nil)
+  (setq nvda--last-sent-message "")
   (cond
    ;; Forward delete - we'll speak char at point AFTER deletion
    ((memq this-command nvda--forward-delete-commands)
