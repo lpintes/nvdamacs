@@ -159,6 +159,8 @@ Used by script_sayVisibility()."
     ("getLineOffsets" . nvda--get-line-offsets)
     ("getCharacterOffsets" . nvda--get-character-offsets)
     ("getWordOffsets" . nvda--get-word-offsets)
+    ("getSentenceOffsets" . nvda--get-sentence-offsets)
+    ("getParagraphOffsets" . nvda--get-paragraph-offsets)
     ("getTextRange" . nvda--get-text-range)
     ("getPointMax" . nvda--get-point-max)
     ("minibufferGetStoryText" . nvda--minibuffer-get-story-text)
@@ -599,6 +601,36 @@ Filters out duplicate consecutive messages to avoid spam."
 
 ;;; Additional reading commands
 
+(defun nvda--get-sentence-offsets (offset)
+  "Get sentence start and end offsets at OFFSET (0-based)."
+  (save-excursion
+    (goto-char (1+ offset))
+    (let ((bounds (bounds-of-thing-at-point 'sentence)))
+      (if bounds
+          `((startOffset . ,(1- (car bounds)))
+            (endOffset . ,(1- (cdr bounds))))
+        `((startOffset . ,offset)
+          (endOffset . ,offset))))))
+
+(defun nvda--get-paragraph-offsets (offset)
+  "Get paragraph start and end offsets at OFFSET (0-based)."
+  (save-excursion
+    (goto-char (1+ offset))
+    (let ((start (progn (backward-paragraph) (point)))
+          (end (progn (forward-paragraph) (point))))
+      `((startOffset . ,(1- start))
+        (endOffset . ,(1- end))))))
+
+(defun nvda-speak-sentence ()
+  "Speak sentence at point."
+  (interactive)
+  (nvda--speak-text-info "sentence"))
+
+(defun nvda-speak-paragraph ()
+  "Speak paragraph at point."
+  (interactive)
+  (nvda--speak-text-info "paragraph"))
+
 (defun nvda-speak-buffer ()
   "Speak entire buffer from beginning to end."
   (interactive)
@@ -673,6 +705,8 @@ Filters out duplicate consecutive messages to avoid spam."
 ;; Additional reading commands (new)
 (define-key nvda-speak-map (kbd "b") 'nvda-speak-buffer)
 (define-key nvda-speak-map (kbd "B") 'nvda-speak-rest-of-buffer)
+(define-key nvda-speak-map (kbd "p") 'nvda-speak-paragraph)
+(define-key nvda-speak-map (kbd "s") 'nvda-speak-sentence)
 (define-key nvda-speak-map (kbd "[") 'nvda-speak-page)
 (define-key nvda-speak-map (kbd "e") 'nvda-speak-sexp)
 (define-key nvda-speak-map (kbd "m") 'nvda-repeat-last-message)

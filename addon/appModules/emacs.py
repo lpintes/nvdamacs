@@ -94,6 +94,14 @@ class EmacsTextInfo(OffsetsTextInfo):
         result = rpcClient.request("getWordOffsets", {"offset": offset})
         return [result["startOffset"], result["endOffset"]]
 
+    def _getSentenceOffsets(self, offset):
+        result = rpcClient.request("getSentenceOffsets", {"offset": offset})
+        return [result["startOffset"], result["endOffset"]]
+
+    def _getParagraphOffsets(self, offset):
+        result = rpcClient.request("getParagraphOffsets", {"offset": offset})
+        return [result["startOffset"], result["endOffset"]]
+
     def _getTextRange(self, start, end):
         # nvda-get-text-range handles all validation and clamping
         result = rpcClient.request("getTextRange", {"start": start, "end": end})
@@ -148,13 +156,14 @@ class AppModule(appModuleHandler.AppModule):
         import controlTypes
 
         unit_name = data.get("unit", "character")
-        unit_map = {
+        unitMap = {
             "character": textInfos.UNIT_CHARACTER,
             "word": textInfos.UNIT_WORD,
             "line": textInfos.UNIT_LINE,
+            "sentence": textInfos.UNIT_SENTENCE,
             "paragraph": textInfos.UNIT_PARAGRAPH,
         }
-        unit = unit_map.get(unit_name, textInfos.UNIT_CHARACTER)
+        unit = unitMap.get(unit_name, textInfos.UNIT_CHARACTER)
 
         # Get the focused Emacs object and create TextInfo
         focus = api.getFocusObject()
