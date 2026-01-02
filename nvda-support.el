@@ -689,10 +689,58 @@ Filters out duplicate consecutive messages to avoid spam."
         (nvda-speak "%s" (mapconcat #'identity lines "\n")))
     (message "No rectangular region active")))
 
+;;; Informative commands
+
+(defun nvda-speak-buffer-info ()
+  "Speak information about current buffer."
+  (interactive)
+  (let ((info (format "Buffer: %s, Size: %d, Mode: %s, Encoding: %s"
+                      (buffer-name)
+                      (buffer-size)
+                      major-mode
+                      buffer-file-coding-system)))
+    (nvda-speak "%s" info)))
+
+(defun nvda-speak-position-info ()
+  "Speak current position information."
+  (interactive)
+  (let* ((line (line-number-at-pos))
+         (col (current-column))
+         (total-lines (count-lines (point-min) (point-max)))
+         (percent (if (> total-lines 0)
+                      (/ (* 100 line) total-lines)
+                    0)))
+    (nvda-speak "Line %d, Column %d, %d%%" line col percent)))
+
+(defun nvda-speak-mode-line ()
+  "Speak the mode line of current window."
+  (interactive)
+  (let ((mode-line-text (format-mode-line mode-line-format)))
+    (nvda-speak "%s" mode-line-text)))
+
+(defun nvda-speak-frame-info ()
+  "Speak information about current frame."
+  (interactive)
+  (let* ((num-windows (length (window-list)))
+         (frame-name (frame-parameter nil 'name))
+         (info (format "Frame: %s, Windows: %d"
+                       frame-name num-windows)))
+    (nvda-speak "%s" info)))
+
+(defun nvda-speak-input-method-info ()
+  "Speak current input method."
+  (interactive)
+  (if current-input-method
+      (nvda-speak "Input method: %s" current-input-method)
+    (nvda-speak "No input method active")))
+
 ;;; NVDA Speak Keymap
 
 (defvar nvda-speak-map (make-sparse-keymap)
   "Keymap for NVDA speak commands.")
+
+(defvar nvda-info-map (make-sparse-keymap)
+  "Keymap for NVDA info commands.")
 
 ;; Basic reading commands (existing)
 (define-key nvda-speak-map (kbd "c") 'nvda-speak-character)
@@ -711,6 +759,16 @@ Filters out duplicate consecutive messages to avoid spam."
 (define-key nvda-speak-map (kbd "e") 'nvda-speak-sexp)
 (define-key nvda-speak-map (kbd "m") 'nvda-repeat-last-message)
 (define-key nvda-speak-map (kbd "R") 'nvda-speak-rectangle)
+
+;; Info commands (M-n i ...)
+(define-key nvda-info-map (kbd "b") 'nvda-speak-buffer-info)
+(define-key nvda-info-map (kbd "p") 'nvda-speak-position-info)
+(define-key nvda-info-map (kbd "m") 'nvda-speak-mode-line)
+(define-key nvda-info-map (kbd "f") 'nvda-speak-frame-info)
+(define-key nvda-info-map (kbd "i") 'nvda-speak-input-method-info)
+
+;; Register info map as sub-keymap
+(define-key nvda-speak-map (kbd "i") nvda-info-map)
 
 (global-set-key (kbd "M-n") nvda-speak-map)
 
