@@ -705,7 +705,7 @@ Filters out duplicate consecutive messages to avoid spam."
   "Speak current position information."
   (interactive)
   (let* ((line (line-number-at-pos))
-         (col (current-column))
+         (col (1+ (current-column)))  ; 1-indexed for user display
          (total-lines (count-lines (point-min) (point-max)))
          (percent (if (> total-lines 0)
                       (/ (* 100 line) total-lines)
