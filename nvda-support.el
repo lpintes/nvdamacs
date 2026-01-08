@@ -172,8 +172,7 @@ Used by script_sayVisibility()."
   "Announce minibuffer prompt and content when entering."
   (let ((text (nvda--minibuffer-get-story-text)))
     (when (and text (not (string-empty-p text)))
-      (setq text (string-replace "%" "%%" text))
-      (nvda-speak text))))
+      (nvda-speak "%s" text))))
 
 (add-hook 'minibuffer-setup-hook #'nvda--announce-minibuffer)
 
@@ -259,6 +258,31 @@ Used by script_sayVisibility()."
   (with-current-buffer (get-buffer-create nvda--server-buffer)
     (goto-char (point-max))
     (insert (apply #'format (concat msg "\n") args))))
+
+;;; Debug system
+
+(defvar nvda--debug-enabled nil
+  "If non-nil, log debug messages to *nvda-server* buffer.")
+
+(defun nvda--debug (msg &rest args)
+  "Log debug MSG to *nvda-server* buffer if debug is enabled."
+  (when nvda--debug-enabled
+    (let ((inhibit-modification-hooks t))  ; Prevent after-change-functions recursion
+      (with-current-buffer (get-buffer-create nvda--server-buffer)
+        (goto-char (point-max))
+        (insert (apply #'format (concat "[DEBUG] " msg "\n") args))))))
+
+(defun nvda-toggle-debug ()
+  "Toggle NVDA debug logging."
+  (interactive)
+  (setq nvda--debug-enabled (not nvda--debug-enabled))
+  (if nvda--debug-enabled
+      (progn
+        (with-current-buffer (get-buffer-create nvda--server-buffer)
+          (erase-buffer)
+          (insert "=== NVDA Debug Log ===\n"))
+        (message "NVDA debug enabled"))
+    (message "NVDA debug disabled")))
 
 (defun nvda--server-write-port (port)
   (with-temp-file nvda--server-port-file
@@ -472,7 +496,8 @@ Filters out duplicate consecutive messages to avoid spam."
 ;; Built-in insertion commands (vždy dostupné)
 (defvar nvda--builtin-insertion-commands
   '(yank yank-pop completion-at-point
-    dabbrev-expand hippie-expand expand-abbrev)
+    dabbrev-expand hippie-expand expand-abbrev
+    minibuffer-complete minibuffer-complete-word minibuffer-force-complete)
   "Built-in commands that insert text.")
 
 ;; Externé balíčky (detekcia za behu)
@@ -480,43 +505,80 @@ Filters out duplicate consecutive messages to avoid spam."
   '((company . (company-complete company-complete-common company-complete-selection)))
   "Alist of (feature . commands) for external packages.")
 
-(defvar nvda--last-change-tick 0
-  "Buffer modification tick to avoid duplicate announcements.")
+(defvar nvda--pending-insertions nil
+  "List of pending insertion texts to announce.")
 
-(defun nvda--is-insertion-command-p ()
-  "Return t if this-command is an insertion command."
+(defvar nvda--insertion-command nil
+  "Last insertion command to track.")
+
+(defvar nvda--insertion-command-buffer nil
+  "Buffer where the insertion command was executed.")
+
+(defun nvda--is-insertion-command-p (cmd)
+  "Return t if CMD is an insertion command."
   (or
    ;; Built-in commands
-   (memq this-command nvda--builtin-insertion-commands)
+   (memq cmd nvda--builtin-insertion-commands)
    ;; External packages (ak sú nainštalované)
    (cl-some (lambda (entry)
               (and (featurep (car entry))
-                   (memq this-command (cdr entry))))
+                   (memq cmd (cdr entry))))
             nvda--external-insertion-commands)))
 
-(defun nvda--announce-insertion (beg end len)
-  "Announce text insertion between BEG and END.
-LEN is length of deleted text (0 for pure insertion)."
+(defun nvda--track-insertion-command ()
+  "Track buffer and command for insertion tracking."
+  (if (nvda--is-insertion-command-p this-command)
+      (progn
+        (nvda--debug "TRACK: cmd=%s buf=%s" this-command (current-buffer))
+        (setq nvda--insertion-command this-command)
+        (setq nvda--insertion-command-buffer (current-buffer)))
+    (setq nvda--insertion-command nil)))
+
+(defun nvda--collect-insertion (beg end len)
+  "Collect text insertion between BEG and END for later announcement.
+LEN is length of deleted text (0 for pure insertion, >0 for replacement)."
+  ;; Skip internal buffers
+  (let ((buf-name (buffer-name)))
+    (unless (or (string-prefix-p " " buf-name)  ; Space-prefixed internal buffers
+                (string-prefix-p "*nvda-" buf-name))  ; NVDA buffers
+      (nvda--debug "COLLECT: insertion-cmd=%s this-cmd=%s len=%s buf=%s insertion-buf=%s"
+                   nvda--insertion-command this-command len buf-name nvda--insertion-command-buffer)))
   (when (and nvda-auto-speak-insertions
-             (= len 0)  ; Pure insertion, no deletion
+             nvda--insertion-command  ; Only if insertion command is active
              (> end beg)  ; Actually inserted something
-             (nvda--is-insertion-command-p)
-             ;; Avoid duplicate announcements
-             (not (= (buffer-chars-modified-tick) nvda--last-change-tick)))
-    (setq nvda--last-change-tick (buffer-chars-modified-tick))
-    (let* ((text (buffer-substring-no-properties beg end))
+             ;; Only in the buffer where command was executed
+             (eq (current-buffer) nvda--insertion-command-buffer))
+    (let ((text (buffer-substring-no-properties beg end)))
+      ;; Avoid duplicates - don't add if same text is already pending
+      (unless (member text nvda--pending-insertions)
+        (nvda--debug "  Collecting text: %S" text)
+        (push text nvda--pending-insertions)))))
+
+(defun nvda--announce-pending-insertions ()
+  "Announce collected insertions after command completion."
+  (when nvda--pending-insertions
+    (nvda--debug "ANNOUNCE: pending=%S" nvda--pending-insertions)
+    (let* ((text (mapconcat #'identity (nreverse nvda--pending-insertions) ""))
            (lines (split-string text "\n" t)))
+      (nvda--debug "  text=%S lines=%d setting=%s" text (length lines) nvda-auto-speak-insertions)
+      (setq nvda--pending-insertions nil)
+      (setq nvda--insertion-command nil)
+      (setq nvda--insertion-command-buffer nil)
       (cond
        ;; Always announce
        ((eq nvda-auto-speak-insertions t)
+        (nvda--debug "  Speaking (always)")
         (nvda-speak "%s" text))
        ;; Only one line
        ((and (eq nvda-auto-speak-insertions 'one-line)
              (<= (length lines) 1))
+        (nvda--debug "  Speaking (one-line)")
         (nvda-speak "%s" text))))))
 
-;; Register on after-change-functions
-(add-hook 'after-change-functions #'nvda--announce-insertion)
+;; Register hooks
+(add-hook 'pre-command-hook #'nvda--track-insertion-command)
+(add-hook 'after-change-functions #'nvda--collect-insertion)
+(add-hook 'post-command-hook #'nvda--announce-pending-insertions)
 
 ;;; Command-specific action system
 
@@ -898,6 +960,9 @@ STRING is the output text (ignored, we use comint-last-output-start)."
 
 ;; Register info map as sub-keymap
 (define-key nvda-speak-map (kbd "i") nvda-info-map)
+
+;; Debug toggle
+(define-key nvda-speak-map (kbd "<f12>") 'nvda-toggle-debug)
 
 (global-set-key (kbd "M-n") nvda-speak-map)
 
