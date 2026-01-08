@@ -1,5 +1,34 @@
 (require 'bindat)
 (require 'json)
+
+;;; Customization
+
+(defgroup nvda nil
+  "NVDA screen reader integration for Emacs."
+  :group 'accessibility
+  :prefix "nvda-")
+
+(defcustom nvda-auto-speak-insertions 'one-line
+  "Automatically speak inserted text.
+Options:
+  nil - Don't announce insertions
+  'one-line - Announce if insertion is one line or less
+  t - Always announce insertions"
+  :type '(choice (const :tag "None" nil)
+                 (const :tag "One line" one-line)
+                 (const :tag "Always" t))
+  :group 'nvda)
+
+(defcustom nvda-auto-speak-comint-output t
+  "If non-nil, automatically speak new output in comint buffers."
+  :type 'boolean
+  :group 'nvda)
+
+(defcustom nvda-auto-speak-buffers '("*Help*" "*Completions*")
+  "List of buffer names that auto-speak when displayed."
+  :type '(repeat string)
+  :group 'nvda)
+
 (defvar nvda--server-process nil)
 (defvar nvda--client-process nil)
 (defvar nvda--server-buffer "*nvda-server*")
@@ -438,6 +467,57 @@ Filters out duplicate consecutive messages to avoid spam."
 (nvda--enable-message-hook)
 (add-hook 'kill-emacs-hook #'nvda--stop-server)
 
+;;; Auto-speak insertions
+
+;; Built-in insertion commands (vždy dostupné)
+(defvar nvda--builtin-insertion-commands
+  '(yank yank-pop completion-at-point
+    dabbrev-expand hippie-expand expand-abbrev)
+  "Built-in commands that insert text.")
+
+;; Externé balíčky (detekcia za behu)
+(defvar nvda--external-insertion-commands
+  '((company . (company-complete company-complete-common company-complete-selection)))
+  "Alist of (feature . commands) for external packages.")
+
+(defvar nvda--last-change-tick 0
+  "Buffer modification tick to avoid duplicate announcements.")
+
+(defun nvda--is-insertion-command-p ()
+  "Return t if this-command is an insertion command."
+  (or
+   ;; Built-in commands
+   (memq this-command nvda--builtin-insertion-commands)
+   ;; External packages (ak sú nainštalované)
+   (cl-some (lambda (entry)
+              (and (featurep (car entry))
+                   (memq this-command (cdr entry))))
+            nvda--external-insertion-commands)))
+
+(defun nvda--announce-insertion (beg end len)
+  "Announce text insertion between BEG and END.
+LEN is length of deleted text (0 for pure insertion)."
+  (when (and nvda-auto-speak-insertions
+             (= len 0)  ; Pure insertion, no deletion
+             (> end beg)  ; Actually inserted something
+             (nvda--is-insertion-command-p)
+             ;; Avoid duplicate announcements
+             (not (= (buffer-chars-modified-tick) nvda--last-change-tick)))
+    (setq nvda--last-change-tick (buffer-chars-modified-tick))
+    (let* ((text (buffer-substring-no-properties beg end))
+           (lines (split-string text "\n" t)))
+      (cond
+       ;; Always announce
+       ((eq nvda-auto-speak-insertions t)
+        (nvda-speak "%s" text))
+       ;; Only one line
+       ((and (eq nvda-auto-speak-insertions 'one-line)
+             (<= (length lines) 1))
+        (nvda-speak "%s" text))))))
+
+;; Register on after-change-functions
+(add-hook 'after-change-functions #'nvda--announce-insertion)
+
 ;;; Command-specific action system
 
 (defvar nvda--on-command-table
@@ -598,6 +678,55 @@ Filters out duplicate consecutive messages to avoid spam."
 
 (nvda-on-command 'dired-previous-line
   (nvda-speak-line 1))
+
+;;; Comint mode support
+
+(defun nvda--in-comint-p ()
+  "Return non-nil if current buffer is a comint buffer."
+  (and (boundp 'comint-last-output-start)
+       comint-last-output-start))
+
+(defun nvda--speak-comint-output (_string)
+  "Speak new output in comint buffer.
+STRING is the output text (ignored, we use comint-last-output-start)."
+  (when (and nvda-auto-speak-comint-output
+             (nvda--in-comint-p)
+             comint-last-output-start)
+    (let* ((start (marker-position comint-last-output-start))
+           (end (process-mark (get-buffer-process (current-buffer))))
+           (output (when (and start end (< start end))
+                    (buffer-substring-no-properties start end))))
+      (when (and output (not (string-empty-p output)))
+        ;; Trim whitespace
+        (setq output (string-trim output))
+        (when (not (string-empty-p output))
+          (nvda-speak "%s" output))))))
+
+;; Hook na comint-output-filter-functions
+(defun nvda--setup-comint-hooks ()
+  "Setup hooks for comint mode."
+  (when (derived-mode-p 'comint-mode)
+    (add-hook 'comint-output-filter-functions
+              #'nvda--speak-comint-output nil t)))
+
+(add-hook 'comint-mode-hook #'nvda--setup-comint-hooks)
+
+;;; Auto-speak specific buffers
+
+(defvar nvda--auto-spoken-buffers (make-hash-table :test 'equal)
+  "Track which buffers were already auto-spoken.")
+
+(defun nvda--auto-speak-buffer ()
+  "Auto-speak content of special buffers when first displayed."
+  (when (and (member (buffer-name) nvda-auto-speak-buffers)
+             (not (gethash (buffer-name) nvda--auto-spoken-buffers)))
+    (puthash (buffer-name) t nvda--auto-spoken-buffers)
+    ;; Speak visible window content
+    (let ((start (1- (window-start)))
+          (end (1- (window-end nil t))))
+      (nvda--speak-text-range start end))))
+
+(add-hook 'window-configuration-change-hook #'nvda--auto-speak-buffer)
 
 ;;; Additional reading commands
 
