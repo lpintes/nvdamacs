@@ -964,6 +964,24 @@ STRING is the output text (ignored, we use comint-last-output-start)."
 ;; Debug toggle
 (define-key nvda-speak-map (kbd "<f12>") 'nvda-toggle-debug)
 
-(global-set-key (kbd "M-n") nvda-speak-map)
+;; Store original C-e command before rebinding
+(defvar nvda--original-C-e-command (key-binding (kbd "C-e"))
+  "Original command bound to C-e before NVDA rebinding.")
+
+(defun nvda-execute-original-C-e ()
+  "Execute the original C-e command (typically move-end-of-line).
+Also invokes any NVDA speech handler registered for that command."
+  (interactive)
+  (call-interactively nvda--original-C-e-command)
+  ;; Manually invoke NVDA handler for the original command if registered
+  (let ((fn (gethash nvda--original-C-e-command nvda--on-command-table)))
+    (when fn
+      (funcall fn))))
+
+;; Bind C-e C-e to execute the original C-e command
+(define-key nvda-speak-map (kbd "C-e") 'nvda-execute-original-C-e)
+
+;; Set C-e as the NVDA prefix key
+(global-set-key (kbd "C-e") nvda-speak-map)
 
 (provide 'nvda-support)
