@@ -1038,4 +1038,4 @@ This mode provides the C-e prefix key for NVDA commands."
 ;; Enable nvda-mode globally
 (nvda-mode 1)
 
-(provide 'nvda-support)
+(provide 'nvda-mode)
