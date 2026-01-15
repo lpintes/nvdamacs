@@ -174,8 +174,6 @@ Used by script_sayVisibility()."
     (when (and text (not (string-empty-p text)))
       (nvda-speak "%s" text))))
 
-(add-hook 'minibuffer-setup-hook #'nvda--announce-minibuffer)
-
 ;;; JSON-RPC Infrastructure
 
 (defvar nvda--method-handlers
@@ -333,11 +331,13 @@ Used by script_sayVisibility()."
                   :family 'ipv4
                   :service 0 ;; use random port
                   :server t
+                  :noquery t  ;; Don't query on exit
                   :filter 'nvda--server-process-filter
                   :sentinel (lambda (proc event)
                               (nvda--server-log "Connection event: %s %s" proc event)
                               (cond
                                ((string-match "^open" event)
+                                (set-process-query-on-exit-flag proc nil)  ;; Don't query on exit for client
                                 (setq nvda--client-process proc))
                                ((string-match "^connection broken\\|^deleted" event)
                                 (setq nvda--client-process nil))))
@@ -349,14 +349,22 @@ Used by script_sayVisibility()."
       (message "NVDA server started on port %d" port))))
 
 (defun nvda--stop-server ()
-  "Stop the NVDA TCP server."
+  "Stop the NVDA TCP server and disconnect any clients."
   (interactive)
-  (when (process-live-p nvda--server-process)
-    (delete-process nvda--server-process)
-    (setq nvda--server-process nil)
-    (setq nvda--client-process nil)
-    (delete-file nvda--server-port-file)
-    (message "NVDA server stopped")))
+  ;; Kill all processes starting with "nvda-" (server and all clients)
+  (dolist (proc (process-list))
+    (when (string-prefix-p "nvda-" (process-name proc))
+      (when (process-live-p proc)
+        (delete-process proc))))
+  ;; Clear process variables
+  (setq nvda--client-process nil)
+  (setq nvda--server-process nil)
+  ;; Clean up port file
+  (when (file-exists-p nvda--server-port-file)
+    (condition-case err
+        (delete-file nvda--server-port-file)
+      (error (message "Warning: Could not delete port file: %s" err))))
+  (message "NVDA server stopped"))
 
 ;;; Event System
 
@@ -496,10 +504,6 @@ Filters out duplicate consecutive messages to avoid spam."
   "Disable sending Emacs messages to NVDA."
   (advice-remove 'message #'nvda--advice-message))
 
-(nvda--start-server)
-(nvda--enable-message-hook)
-(add-hook 'kill-emacs-hook #'nvda--stop-server)
-
 ;;; Auto-speak insertions
 
 ;; Built-in insertion commands (vždy dostupné)
@@ -583,11 +587,6 @@ LEN is length of deleted text (0 for pure insertion, >0 for replacement)."
              (<= (length lines) 1))
         (nvda--debug "  Speaking (one-line)")
         (nvda-speak "%s" text))))))
-
-;; Register hooks
-(add-hook 'pre-command-hook #'nvda--track-insertion-command)
-(add-hook 'after-change-functions #'nvda--collect-insertion)
-(add-hook 'post-command-hook #'nvda--announce-pending-insertions)
 
 ;;; Command-specific action system
 
@@ -677,8 +676,6 @@ LEN is length of deleted text (0 for pure insertion, >0 for replacement)."
     (setq nvda--pending-deleted-char nil)
     (setq nvda--pending-delete-type nil)))
 
-(add-hook 'pre-command-hook #'nvda--pre-command-hook)
-
 (defun nvda--post-command-dispatch ()
   "Execute command-specific actions and read messages."
   ;; First, speak any deleted character
@@ -700,8 +697,6 @@ LEN is length of deleted text (0 for pure insertion, >0 for replacement)."
       (setq nvda--last-sent-message echo)
       (setq nvda--last-spoken-message echo)
       (nvda-speak "%s" echo))))
-
-(add-hook 'post-command-hook #'nvda--post-command-dispatch)
 
 ;;; Navigation command speech bindings
 
@@ -802,8 +797,6 @@ STRING is the output text (ignored, we use comint-last-output-start)."
     (add-hook 'comint-output-filter-functions
               #'nvda--speak-comint-output nil t)))
 
-(add-hook 'comint-mode-hook #'nvda--setup-comint-hooks)
-
 ;;; Auto-speak specific buffers
 
 (defvar nvda--auto-spoken-buffers (make-hash-table :test 'equal)
@@ -818,8 +811,6 @@ STRING is the output text (ignored, we use comint-last-output-start)."
     (let ((start (1- (window-start)))
           (end (1- (window-end nil t))))
       (nvda--speak-text-range start end))))
-
-(add-hook 'window-configuration-change-hook #'nvda--auto-speak-buffer)
 
 ;;; Additional reading commands
 
@@ -1030,10 +1021,38 @@ registered for that command."
 
 (define-minor-mode nvda-mode
   "Minor mode for NVDA screen reader integration.
-This mode provides the C-e prefix key for NVDA commands."
+This mode provides the C-e prefix key for NVDA commands and manages
+the RPC server, hooks, and speech integration."
   :global t
   :lighter " NVDA"
-  :keymap nvda-mode-map)
+  :keymap nvda-mode-map
+  (if nvda-mode
+      ;; Enable: start server and register all hooks
+      (progn
+        (nvda--start-server)
+        (nvda--enable-message-hook)
+        (add-hook 'kill-emacs-hook #'nvda--stop-server)
+        (add-hook 'minibuffer-setup-hook #'nvda--announce-minibuffer)
+        (add-hook 'pre-command-hook #'nvda--track-insertion-command)
+        (add-hook 'after-change-functions #'nvda--collect-insertion)
+        (add-hook 'post-command-hook #'nvda--announce-pending-insertions)
+        (add-hook 'pre-command-hook #'nvda--pre-command-hook)
+        (add-hook 'post-command-hook #'nvda--post-command-dispatch)
+        (add-hook 'comint-mode-hook #'nvda--setup-comint-hooks)
+        (add-hook 'window-configuration-change-hook #'nvda--auto-speak-buffer))
+    ;; Disable: stop server and remove all hooks
+    (progn
+      (nvda--stop-server)
+      (nvda--disable-message-hook)
+      (remove-hook 'kill-emacs-hook #'nvda--stop-server)
+      (remove-hook 'minibuffer-setup-hook #'nvda--announce-minibuffer)
+      (remove-hook 'pre-command-hook #'nvda--track-insertion-command)
+      (remove-hook 'after-change-functions #'nvda--collect-insertion)
+      (remove-hook 'post-command-hook #'nvda--announce-pending-insertions)
+      (remove-hook 'pre-command-hook #'nvda--pre-command-hook)
+      (remove-hook 'post-command-hook #'nvda--post-command-dispatch)
+      (remove-hook 'comint-mode-hook #'nvda--setup-comint-hooks)
+      (remove-hook 'window-configuration-change-hook #'nvda--auto-speak-buffer))))
 
 ;; Enable nvda-mode globally
 (nvda-mode 1)
