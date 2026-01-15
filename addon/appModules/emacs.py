@@ -141,6 +141,7 @@ class AppModule(appModuleHandler.AppModule):
             rpcClient.registerEventHandler("speakMessage", self._onSpeakMessageEvent)
             rpcClient.registerEventHandler("speakTextInfo", self._onSpeakTextInfoEvent)
             rpcClient.registerEventHandler("speakCharacter", self._onSpeakCharacterEvent)
+            rpcClient.registerEventHandler("beep", self._onBeepEvent)
 
     def _onSpeakMessageEvent(self, data):
         """Handle speakMessage event from Emacs - for notifications."""
@@ -181,6 +182,12 @@ class AppModule(appModuleHandler.AppModule):
         char = data.get("char", "")
         if char:
             speech.speakSpelling(char)
+
+    def _onBeepEvent(self, data):
+        """Handle beep event from Emacs - play a tone."""
+        frequency = data.get("frequency", 1000)
+        duration = data.get("duration", 100)
+        tones.beep(frequency, duration)
 
     def terminate(self):
         global rpcClient

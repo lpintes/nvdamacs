@@ -370,6 +370,15 @@ Takes FORMAT-STRING and ARGS like 'message'."
       (when (and text (not (string-empty-p text)))
         (nvda--send-event nvda--client-process "speakMessage" `((text . ,text)))))))
 
+(defun nvda-beep (frequency duration)
+  "Play a beep tone with FREQUENCY (Hz) and DURATION (milliseconds)."
+  (interactive "nFrequency (Hz): \nnDuration (ms): ")
+  (when (and nvda--client-process
+             (process-live-p nvda--client-process))
+    (nvda--send-event nvda--client-process "beep"
+                      `((frequency . ,frequency)
+                        (duration . ,duration)))))
+
 (defun nvda--speak-text-info (unit)
   "Tell NVDA to speak text at caret with UNIT expansion.
 UNIT is one of: character, word, line, paragraph."
