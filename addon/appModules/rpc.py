@@ -179,7 +179,7 @@ class RpcClient:
 			print(f"Failed to read port file: {e}")
 			return None
 
-	def request(self, method, params=None, timeout=2.0):
+	def request(self, method, params=None, timeout=8.0):
 		"""Make blocking request and wait for response."""
 		if not self.worker or not self.worker.is_alive():
 			raise RuntimeError("RpcClient not connected")
