@@ -998,24 +998,44 @@ STRING is the output text (ignored, we use comint-last-output-start)."
 ;; Toggle speaking of unhandled commands
 (define-key nvda-speak-map (kbd "<f11>") 'nvda-toggle-speak-unhandled-commands)
 
-;; Store original C-e command before rebinding
-(defvar nvda--original-C-e-command (key-binding (kbd "C-e"))
-  "Original command bound to C-e before NVDA rebinding.")
+;;; Minor mode for NVDA prefix key
+;; Using minor mode ensures our C-e binding has priority over major mode bindings
 
-(defun nvda-execute-original-C-e ()
-  "Execute the original C-e command (typically move-end-of-line).
-Also invokes any NVDA speech handler registered for that command."
+(defvar nvda-mode-map (make-sparse-keymap)
+  "Keymap for nvda-mode (minor mode for NVDA prefix key).")
+
+(defun nvda--get-original-command ()
+  "Get the command that C-e would execute without NVDA minor mode.
+This respects major mode bindings (e.g., calendar-end-of-week) and
+global bindings (e.g., move-end-of-line or user's custom binding)."
+  (or (lookup-key (current-local-map) (kbd "C-e"))
+      (lookup-key global-map (kbd "C-e"))))
+
+(defun nvda--execute-original-C-e ()
+  "Execute the original C-e command (context-dependent).
+Dynamically determines what C-e would do without NVDA minor mode,
+respecting major mode bindings. Also invokes any NVDA speech handler
+registered for that command."
   (interactive)
-  (call-interactively nvda--original-C-e-command)
-  ;; Manually invoke NVDA handler for the original command if registered
-  (let ((fn (gethash nvda--original-C-e-command nvda--on-command-table)))
-    (when fn
-      (funcall fn))))
+  (let ((original-cmd (nvda--get-original-command)))
+    (call-interactively original-cmd)
+    ;; Set this-command so post-command-hook sees the original command
+    (setq this-command original-cmd)))
 
 ;; Bind C-e C-e to execute the original C-e command
-(define-key nvda-speak-map (kbd "C-e") 'nvda-execute-original-C-e)
+(define-key nvda-speak-map (kbd "C-e") 'nvda--execute-original-C-e)
 
-;; Set C-e as the NVDA prefix key
-(global-set-key (kbd "C-e") nvda-speak-map)
+;; Set C-e as the NVDA prefix key in minor mode map
+(define-key nvda-mode-map (kbd "C-e") nvda-speak-map)
+
+(define-minor-mode nvda-mode
+  "Minor mode for NVDA screen reader integration.
+This mode provides the C-e prefix key for NVDA commands."
+  :global t
+  :lighter " NVDA"
+  :keymap nvda-mode-map)
+
+;; Enable nvda-mode globally
+(nvda-mode 1)
 
 (provide 'nvda-support)
