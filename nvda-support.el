@@ -603,6 +603,23 @@ LEN is length of deleted text (0 for pure insertion, >0 for replacement)."
               ,@body)
             nvda--on-command-table))
 
+;;; Speaking of unhandled commands
+
+(defvar nvda--speak-unhandled-commands nil
+  "If non-nil, speak names of commands that have no nvda-on-command handler.")
+
+(defvar nvda--noisy-commands
+  '(self-insert-command)
+  "Commands that should not be announced even when speak-unhandled-commands is enabled.")
+
+(defun nvda-toggle-speak-unhandled-commands ()
+  "Toggle speaking of unhandled command names."
+  (interactive)
+  (setq nvda--speak-unhandled-commands (not nvda--speak-unhandled-commands))
+  (if nvda--speak-unhandled-commands
+      (message "Speaking of unhandled commands enabled")
+    (message "Speaking of unhandled commands disabled")))
+
 ;;; Delete command speech support
 
 (defvar nvda--forward-delete-commands
@@ -668,8 +685,13 @@ LEN is length of deleted text (0 for pure insertion, >0 for replacement)."
   (nvda--post-command-speak-deleted)
   ;; Then, execute command-specific action if registered
   (let ((fn (gethash this-command nvda--on-command-table)))
-    (when fn
-      (funcall fn)))
+    (if fn
+        (funcall fn)
+      ;; If no handler and speak-unhandled-commands is enabled, announce command name
+      (when (and nvda--speak-unhandled-commands
+                 this-command
+                 (not (memq this-command nvda--noisy-commands)))
+        (nvda-speak "%s" (symbol-name this-command)))))
   ;; Finally, read any messages from the echo area
   ;; Skip if this message was already spoken by message advice
   (let ((echo (current-message)))
@@ -972,6 +994,9 @@ STRING is the output text (ignored, we use comint-last-output-start)."
 
 ;; Debug toggle
 (define-key nvda-speak-map (kbd "<f12>") 'nvda-toggle-debug)
+
+;; Toggle speaking of unhandled commands
+(define-key nvda-speak-map (kbd "<f11>") 'nvda-toggle-speak-unhandled-commands)
 
 ;; Store original C-e command before rebinding
 (defvar nvda--original-C-e-command (key-binding (kbd "C-e"))
