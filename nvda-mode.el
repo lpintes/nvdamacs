@@ -496,14 +496,6 @@ Filters out duplicate consecutive messages to avoid spam."
         (setq nvda--last-spoken-message text)
         (apply #'nvda-speak format-string args)))))
 
-(defun nvda--enable-message-hook ()
-  "Enable sending Emacs messages to NVDA."
-  (advice-add 'message :after #'nvda--advice-message))
-
-(defun nvda--disable-message-hook ()
-  "Disable sending Emacs messages to NVDA."
-  (advice-remove 'message #'nvda--advice-message))
-
 ;;; map-y-or-n-p support
 
 (defun nvda--advice-map-y-or-n-p (orig-fun prompter actor list &optional help action-alist no-cursor-in-echo-area)
@@ -530,24 +522,14 @@ while displaying prompts in the echo area, so NVDA doesn't read them automatical
           (t prompter))))
     (funcall orig-fun wrapped-prompter actor list help action-alist no-cursor-in-echo-area)))
 
-(defun nvda--enable-map-y-or-n-p-hook ()
-  "Enable announcing map-y-or-n-p prompts to NVDA."
-  (advice-add 'map-y-or-n-p :around #'nvda--advice-map-y-or-n-p))
-
-(defun nvda--disable-map-y-or-n-p-hook ()
-  "Disable announcing map-y-or-n-p prompts to NVDA."
-  (advice-remove 'map-y-or-n-p #'nvda--advice-map-y-or-n-p))
-
 ;;; Auto-speak insertions
 
-;; Built-in insertion commands (vždy dostupné)
 (defvar nvda--builtin-insertion-commands
   '(yank yank-pop completion-at-point
     dabbrev-expand hippie-expand expand-abbrev
     minibuffer-complete minibuffer-complete-word minibuffer-force-complete)
   "Built-in commands that insert text.")
 
-;; Externé balíčky (detekcia za behu)
 (defvar nvda--external-insertion-commands
   '((company . (company-complete company-complete-common company-complete-selection)))
   "Alist of (feature . commands) for external packages.")
@@ -566,7 +548,7 @@ while displaying prompts in the echo area, so NVDA doesn't read them automatical
   (or
    ;; Built-in commands
    (memq cmd nvda--builtin-insertion-commands)
-   ;; External packages (ak sú nainštalované)
+   ;; External packages (if installed)
    (cl-some (lambda (entry)
               (and (featurep (car entry))
                    (memq cmd (cdr entry))))
@@ -824,7 +806,6 @@ STRING is the output text (ignored, we use comint-last-output-start)."
         (when (not (string-empty-p output))
           (nvda-speak "%s" output))))))
 
-;; Hook na comint-output-filter-functions
 (defun nvda--setup-comint-hooks ()
   "Setup hooks for comint mode."
   (when (derived-mode-p 'comint-mode)
@@ -989,7 +970,6 @@ STRING is the output text (ignored, we use comint-last-output-start)."
 (defvar nvda-info-map (make-sparse-keymap)
   "Keymap for NVDA info commands.")
 
-;; Basic reading commands (existing)
 (define-key nvda-speak-map (kbd "c") 'nvda-speak-character)
 (define-key nvda-speak-map (kbd "w") 'nvda-speak-word)
 (define-key nvda-speak-map (kbd "l") 'nvda-speak-line)
@@ -997,7 +977,6 @@ STRING is the output text (ignored, we use comint-last-output-start)."
 (define-key nvda-speak-map (kbd "v") 'nvda-speak-window)
 (define-key nvda-speak-map (kbd "o") 'nvda-speak-other-window)
 
-;; Additional reading commands (new)
 (define-key nvda-speak-map (kbd "b") 'nvda-speak-buffer)
 (define-key nvda-speak-map (kbd "B") 'nvda-speak-rest-of-buffer)
 (define-key nvda-speak-map (kbd "p") 'nvda-speak-paragraph)
@@ -1007,20 +986,16 @@ STRING is the output text (ignored, we use comint-last-output-start)."
 (define-key nvda-speak-map (kbd "m") 'nvda-repeat-last-message)
 (define-key nvda-speak-map (kbd "R") 'nvda-speak-rectangle)
 
-;; Info commands (M-n i ...)
 (define-key nvda-info-map (kbd "b") 'nvda-speak-buffer-info)
 (define-key nvda-info-map (kbd "p") 'nvda-speak-position-info)
 (define-key nvda-info-map (kbd "m") 'nvda-speak-mode-line)
 (define-key nvda-info-map (kbd "f") 'nvda-speak-frame-info)
 (define-key nvda-info-map (kbd "i") 'nvda-speak-input-method-info)
 
-;; Register info map as sub-keymap
 (define-key nvda-speak-map (kbd "i") nvda-info-map)
 
-;; Debug toggle
 (define-key nvda-speak-map (kbd "<f12>") 'nvda-toggle-debug)
 
-;; Toggle speaking of unhandled commands
 (define-key nvda-speak-map (kbd "<f11>") 'nvda-toggle-speak-unhandled-commands)
 
 ;;; Minor mode for NVDA prefix key
@@ -1064,8 +1039,8 @@ the RPC server, hooks, and speech integration."
       ;; Enable: start server and register all hooks
       (progn
         (nvda--start-server)
-        (nvda--enable-message-hook)
-        (nvda--enable-map-y-or-n-p-hook)
+        (advice-add 'message :after #'nvda--advice-message)
+        (advice-add 'map-y-or-n-p :around #'nvda--advice-map-y-or-n-p)
         (add-hook 'kill-emacs-hook #'nvda--stop-server)
         (add-hook 'minibuffer-setup-hook #'nvda--announce-minibuffer)
         (add-hook 'pre-command-hook #'nvda--track-insertion-command)
@@ -1078,8 +1053,8 @@ the RPC server, hooks, and speech integration."
     ;; Disable: stop server and remove all hooks
     (progn
       (nvda--stop-server)
-      (nvda--disable-message-hook)
-      (nvda--disable-map-y-or-n-p-hook)
+      (advice-remove 'message #'nvda--advice-message)
+      (advice-remove 'map-y-or-n-p #'nvda--advice-map-y-or-n-p)
       (remove-hook 'kill-emacs-hook #'nvda--stop-server)
       (remove-hook 'minibuffer-setup-hook #'nvda--announce-minibuffer)
       (remove-hook 'pre-command-hook #'nvda--track-insertion-command)
@@ -1090,7 +1065,6 @@ the RPC server, hooks, and speech integration."
       (remove-hook 'comint-mode-hook #'nvda--setup-comint-hooks)
       (remove-hook 'window-configuration-change-hook #'nvda--auto-speak-buffer))))
 
-;; Enable nvda-mode globally
 (nvda-mode 1)
 
 (provide 'nvda-mode)
