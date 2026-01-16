@@ -618,6 +618,14 @@ LEN is length of deleted text (0 for pure insertion, >0 for replacement)."
               ,@body)
             nvda--on-command-table))
 
+(defmacro nvda-on-commands (commands &rest body)
+  "Register BODY to be executed after each command in COMMANDS list."
+  (declare (indent 1))
+  (cons 'progn
+        (mapcar (lambda (cmd)
+                  `(nvda-on-command ',cmd ,@body))
+                (cadr commands))))
+
 ;;; Speaking of unhandled commands
 
 (defvar nvda--speak-unhandled-commands nil
@@ -717,70 +725,32 @@ LEN is length of deleted text (0 for pure insertion, >0 for replacement)."
 ;;; Navigation command speech bindings
 
 ;; Characters
-(nvda-on-command 'forward-char
-  (nvda-speak-character))
-
-(nvda-on-command 'backward-char
-  (nvda-speak-character))
-
-(nvda-on-command 'right-char
-  (nvda-speak-character))
-
-(nvda-on-command 'left-char
+(nvda-on-commands '(forward-char backward-char right-char left-char)
   (nvda-speak-character))
 
 ;; Words
-(nvda-on-command 'forward-word
-  (nvda-speak-word))
-
-(nvda-on-command 'backward-word
-  (nvda-speak-word))
-
-(nvda-on-command 'left-word
-  (nvda-speak-word))
-
-(nvda-on-command 'right-word
+(nvda-on-commands '(forward-word backward-word left-word right-word)
   (nvda-speak-word))
 
 ;; Lines
-(nvda-on-command 'next-line
-  (nvda-speak-line))
-
-(nvda-on-command 'previous-line
+(nvda-on-commands '(next-line previous-line)
   (nvda-speak-line))
 
 ;; Beginning/end of line - speak character at point
-(nvda-on-command 'move-beginning-of-line
-  (nvda-speak-character))
-
-(nvda-on-command 'move-end-of-line
-  (nvda-speak-character))
-
-(nvda-on-command 'beginning-of-visual-line
-  (nvda-speak-character))
-
-(nvda-on-command 'end-of-visual-line
+(nvda-on-commands '(move-beginning-of-line move-end-of-line
+                    beginning-of-visual-line end-of-visual-line)
   (nvda-speak-character))
 
 ;; Paragraphs
-(nvda-on-command 'forward-paragraph
-  (nvda-speak-line))
-
-(nvda-on-command 'backward-paragraph
+(nvda-on-commands '(forward-paragraph backward-paragraph)
   (nvda-speak-line))
 
 ;; Scrolling
-(nvda-on-command 'scroll-down-command
-  (nvda-speak-line))
-
-(nvda-on-command 'scroll-up-command
+(nvda-on-commands '(scroll-down-command scroll-up-command)
   (nvda-speak-line))
 
 ;; Dired - speak from cursor to end of line
-(nvda-on-command 'dired-next-line
-  (nvda-speak-line 1))
-
-(nvda-on-command 'dired-previous-line
+(nvda-on-commands '(dired-next-line dired-previous-line)
   (nvda-speak-line 1))
 
 ;;; Comint mode support
