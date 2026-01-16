@@ -504,6 +504,40 @@ Filters out duplicate consecutive messages to avoid spam."
   "Disable sending Emacs messages to NVDA."
   (advice-remove 'message #'nvda--advice-message))
 
+;;; map-y-or-n-p support
+
+(defun nvda--advice-map-y-or-n-p (orig-fun prompter actor list &optional help action-alist no-cursor-in-echo-area)
+  "Announce prompts from map-y-or-n-p to NVDA.
+map-y-or-n-p is used for asking a series of similar questions (e.g., save-some-buffers,
+delete-matching-lines, revert-buffers). Unlike y-or-n-p, it keeps the cursor in the buffer
+while displaying prompts in the echo area, so NVDA doesn't read them automatically."
+  (let ((wrapped-prompter
+         (cond
+          ;; If prompter is a string (e.g., "Save file %s? ")
+          ((stringp prompter)
+           (lambda (object)
+             (let ((prompt (format prompter object)))
+               (nvda-speak "%s" prompt)
+               prompt)))
+          ;; If prompter is a function
+          ((functionp prompter)
+           (lambda (object)
+             (let ((result (funcall prompter object)))
+               (when (stringp result)
+                 (nvda-speak "%s" result))
+               result)))
+          ;; Otherwise, use as-is
+          (t prompter))))
+    (funcall orig-fun wrapped-prompter actor list help action-alist no-cursor-in-echo-area)))
+
+(defun nvda--enable-map-y-or-n-p-hook ()
+  "Enable announcing map-y-or-n-p prompts to NVDA."
+  (advice-add 'map-y-or-n-p :around #'nvda--advice-map-y-or-n-p))
+
+(defun nvda--disable-map-y-or-n-p-hook ()
+  "Disable announcing map-y-or-n-p prompts to NVDA."
+  (advice-remove 'map-y-or-n-p #'nvda--advice-map-y-or-n-p))
+
 ;;; Auto-speak insertions
 
 ;; Built-in insertion commands (vždy dostupné)
@@ -1031,6 +1065,7 @@ the RPC server, hooks, and speech integration."
       (progn
         (nvda--start-server)
         (nvda--enable-message-hook)
+        (nvda--enable-map-y-or-n-p-hook)
         (add-hook 'kill-emacs-hook #'nvda--stop-server)
         (add-hook 'minibuffer-setup-hook #'nvda--announce-minibuffer)
         (add-hook 'pre-command-hook #'nvda--track-insertion-command)
@@ -1044,6 +1079,7 @@ the RPC server, hooks, and speech integration."
     (progn
       (nvda--stop-server)
       (nvda--disable-message-hook)
+      (nvda--disable-map-y-or-n-p-hook)
       (remove-hook 'kill-emacs-hook #'nvda--stop-server)
       (remove-hook 'minibuffer-setup-hook #'nvda--announce-minibuffer)
       (remove-hook 'pre-command-hook #'nvda--track-insertion-command)
