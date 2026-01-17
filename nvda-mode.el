@@ -745,6 +745,9 @@ LEN is length of deleted text (0 for pure insertion, >0 for replacement)."
 (nvda-on-commands '(forward-paragraph backward-paragraph)
   (nvda-speak-line))
 
+;; Sentences
+(nvda-on-commands '(forward-sentence backward-sentence)
+  (nvda--speak-text-info "sentence"))
 ;; Scrolling
 (nvda-on-commands '(scroll-down-command scroll-up-command)
   (nvda-speak-line))
